@@ -8,7 +8,7 @@ export const orderEndpoints = {
     return await NETWORK.get(`/orders/customer/${customerId}`)
   },
   async getDriver(driverId) {
-    return await NETWORK.get(`/drivers/${driverId}`)
+    return await NETWORK.get(`/drivers/driver/${driverId}`)
   },
 
   async trackOrder(orderId) {

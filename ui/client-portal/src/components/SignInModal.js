@@ -28,7 +28,7 @@ const SignInModal = ({ onClose }) => {
         <h2 style={{marginTop:0,marginBottom:18,fontWeight:600,fontSize:22,color:'#1e293b'}}>Sign In</h2>
         <form onSubmit={handleSubmit} className="create-order-form">
           <label>
-            Username
+            Username or email
             <input name="username" value={username} onChange={(e)=>setUsername(e.target.value)} required />
           </label>
           <label>
@@ -47,4 +47,3 @@ const SignInModal = ({ onClose }) => {
 };
 
 export default SignInModal;
-

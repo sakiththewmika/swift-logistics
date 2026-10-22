@@ -72,6 +72,11 @@ const ClientPortal = () => {
   }, [isAuthenticated, fetchOrders]);
 
   const handleCreateOrder = async (orderData) => {
+    if (!isAuthenticated) {
+      setShowCreateOrder(false);
+      setShowSignIn(true);
+      return;
+    }
     const newOrder = {
       ...orderData,
       customerId: getCustomerId() || undefined,
@@ -100,7 +105,7 @@ const ClientPortal = () => {
             )}
             {isAuthenticated ? (
               <>
-                <UserProfile user={{ name: customer?.name || customer?.fullName || customer?.email || 'Customer' }} />
+                <UserProfile user={{ name: customer?.customerName || customer?.customerEmail || 'Customer' }} />
                 <button className="create-order-btn" onClick={fetchOrders} title="Refresh orders">
                   <RefreshCw size={16} style={{ marginRight: 8 }} /> Refresh
                 </button>
