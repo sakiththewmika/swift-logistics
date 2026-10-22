@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   # RabbitMQ Message Broker
   rabbitmq:
@@ -7,10 +5,11 @@ services:
     container_name: swift-rabbitmq
     restart: unless-stopped
     ports:
-      - "5672:5672" # AMQP port
-      - "15672:15672" # Management UI port
-    env_file:
-      - ../services/orchestrator/.env
+      - "127.0.0.1:5672:5672" # AMQP port for host-local clients
+      - "127.0.0.1:15672:15672" # Management UI for host-local administration
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     networks:
@@ -33,7 +32,7 @@ services:
     env_file:
       - ../services/orchestrator/.env
     environment:
-      # Spring Boot Configuration
+      RABBITMQ_HOST: rabbitmq
       SPRING_PROFILES_ACTIVE: docker
     depends_on:
       rabbitmq:
@@ -54,6 +53,9 @@ services:
       - "8003:8003" # Application port
     env_file:
       - ../services/wms-adapter/app/.env
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      WMS_DEBUG: "false"
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -71,6 +73,9 @@ services:
       - "8004:8004" # Application port
     env_file:
       - ../services/ros-integration/.env
+    environment:
+      ADAPTER_PORT: 8004
+      RABBITMQ_HOST: rabbitmq
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -82,14 +87,21 @@ services:
       context: ../legacy/cms
       dockerfile: Dockerfile
     container_name: cms-mock-service
+    restart: unless-stopped
     ports:
-      - "5001:5001"
+      - "127.0.0.1:5001:5001"
     environment:
       - SERVER_PORT=5001
       - SPRING_APPLICATION_NAME=cms-mock
       - JAVA_OPTS=-Xmx512m -Xms256m
     networks:
         - swift-network
+    healthcheck:
+      test: ["CMD-SHELL", "grep -Eq '00000000:1389 |:1389 ' /proc/net/tcp /proc/net/tcp6"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
   cms-adapter:
     build:
@@ -101,9 +113,11 @@ services:
       - "8001:8001" # Application port
     env_file:
       - ../services/cms-adapter/.env
+    environment:
+      RABBITMQ_HOST: rabbitmq
     depends_on:
       cms:
-        condition: service_started
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
     networks:
