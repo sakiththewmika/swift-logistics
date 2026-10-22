@@ -1,18 +1,18 @@
 import apiClient from './network';
 
 /**
- * Authenticates a driver using their email and password.
+ * Authenticates a driver using their username and password.
  *
- * @param {string} email - The driver's email address.
+ * @param {string} driverName - The driver's username.
  * @param {string} password - The driver's password.
  * @returns {Promise<object>} A promise that resolves to the login response,
  * which includes the auth token and driver details.
  */
-export const login = (email, password) => {
-    if (!email || !password) {
-        return Promise.reject(new Error('Email and password are required.'));
+export const login = (driverName, password) => {
+    if (!driverName || !password) {
+        return Promise.reject(new Error('Username and password are required.'));
     }
-    return apiClient.post('/auth/driver', { username: email, password });
+    return apiClient.post('/auth/driver', { username: driverName, password });
 };
 
 /**
@@ -34,5 +34,5 @@ export const signup = (driver) => {
  * @returns {Promise<object>} A promise that resolves to the logout response.
  */
 export const logout = () => {
-    return apiClient.post('/driver-logout');
+    return apiClient.post('/auth/driver-logout');
 };

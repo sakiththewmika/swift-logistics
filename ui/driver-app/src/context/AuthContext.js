@@ -13,14 +13,27 @@ export const AuthProvider = ({ children }) => {
         // from a previous session.
         const storedDriver = localStorage.getItem('driver_details');
         if (token && storedDriver) {
-            setDriver(JSON.parse(storedDriver));
+            try {
+                const parsedDriver = JSON.parse(storedDriver);
+                if (parsedDriver?.driverId === token) {
+                    setDriver(parsedDriver);
+                } else {
+                    localStorage.removeItem('driver_token');
+                    localStorage.removeItem('driver_details');
+                    setToken(null);
+                }
+            } catch {
+                localStorage.removeItem('driver_token');
+                localStorage.removeItem('driver_details');
+                setToken(null);
+            }
         }
         setLoading(false);
     }, [token]);
 
-    const login = async (email, password) => {
+    const login = async (driverName, password) => {
         try {
-            const user = await loginApi(email, password);
+            const user = await loginApi(driverName, password);
             console.log("user:", user);
             const token = user.driverId;
 
@@ -39,11 +52,10 @@ export const AuthProvider = ({ children }) => {
 
     const signup = async (driver) => {
         try {
-            const response = await signupApi(driver);
-            // Optionally auto-login after signup:
-            const user = response.data;
-            localStorage.setItem('driver_details', JSON.stringify(user.driverId));
-            setToken(user);
+            const user = await signupApi(driver);
+            localStorage.setItem('driver_token', user.driverId);
+            localStorage.setItem('driver_details', JSON.stringify(user));
+            setToken(user.driverId);
             setDriver(user);
         } catch (error) {
             console.error("Signup failed:", error);

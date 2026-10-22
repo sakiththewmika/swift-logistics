@@ -12,7 +12,7 @@ export const getAssignedOrders = (driverId) => {
         return Promise.reject(new Error('Driver ID is required.'));
     }
     // Note the '/orders' in the path, matching the controller's base path
-    return apiClient.get(`/drivers/orders/${driverId}`);
+    return apiClient.get(`/drivers/driver/${driverId}`);
 };
 
 /**

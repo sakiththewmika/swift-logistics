@@ -3,6 +3,9 @@ import { MapPin, Package } from 'lucide-react';
 import '../AppStyles.css';
 
 const DeliveryItem = ({ delivery, onStart, onComplete }) => {
+  const deliveryId = delivery.id ?? delivery.orderId;
+  const status = delivery.status ?? 'UNKNOWN';
+  const items = Array.isArray(delivery.items) ? delivery.items : [];
   const getStatusClass = (status) => {
     switch (status) {
       case 'ASSIGNED': return 'status-badge assigned';
@@ -24,12 +27,12 @@ const DeliveryItem = ({ delivery, onStart, onComplete }) => {
     <div className="delivery-item">
       <div className="delivery-item-header">
         <div>
-          <h3 className="delivery-id">{delivery.id}</h3>
-          <p className="customer-name">{delivery.customerName}</p>
+          <h3 className="delivery-id">{deliveryId}</h3>
+          <p className="customer-name">{delivery.customerName || 'Customer'}</p>
         </div>
         <div className="badge-container">
-          <span className={getStatusClass(delivery.status)}>
-            {delivery.status.replace('_', ' ')}
+          <span className={getStatusClass(status)}>
+            {status.replace('_', ' ')}
           </span>
           <span className={getPriorityClass(delivery.priority)}>
             {delivery.priority}
@@ -43,7 +46,7 @@ const DeliveryItem = ({ delivery, onStart, onComplete }) => {
         </div>
         <div className="detail-row">
           <Package size={16} color="#9ca3af" />
-          <span>{delivery.items.join(', ')}</span>
+          <span>{items.length ? items.join(', ') : 'No package details'}</span>
         </div>
         {delivery.notes && (
           <div className="note">
@@ -51,12 +54,12 @@ const DeliveryItem = ({ delivery, onStart, onComplete }) => {
           </div>
         )}
       </div>
-      {delivery.status === 'ASSIGNED' && (
+      {(status === 'ASSIGNED' || status === 'ROUTED') && (
         <div className="delivery-actions">
-          <button onClick={() => onStart(delivery.id)} className="gray-button">
+          <button onClick={() => onStart(deliveryId)} className="gray-button">
             Start
           </button>
-          <button onClick={() => onComplete(delivery.id)} className="small-success-button">
+          <button onClick={() => onComplete(deliveryId)} className="small-success-button">
             Complete
           </button>
         </div>
@@ -66,4 +69,3 @@ const DeliveryItem = ({ delivery, onStart, onComplete }) => {
 };
 
 export default DeliveryItem;
-

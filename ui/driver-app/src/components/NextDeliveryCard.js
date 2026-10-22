@@ -4,6 +4,7 @@ import '../AppStyles.css';
 
 const NextDeliveryCard = ({ delivery, onStart, onComplete }) => {
   if (!delivery) return null;
+  const deliveryId = delivery.id ?? delivery.orderId;
   const getPriorityClass = (priority) => {
     switch (priority) {
       case 'HIGH': return 'priority-badge high';
@@ -57,11 +58,11 @@ const NextDeliveryCard = ({ delivery, onStart, onComplete }) => {
         </div>
       </div>
       <div className="action-buttons">
-        <button onClick={() => onStart(delivery.id)} className="primary-button">
+        <button onClick={() => onStart(deliveryId)} className="primary-button">
           <Truck size={16} />
           Start Delivery
         </button>
-        <button onClick={() => onComplete(delivery.id)} className="success-button">
+        <button onClick={() => onComplete(deliveryId)} className="success-button">
           <CheckCircle size={16} />
           Mark Complete
         </button>
@@ -71,4 +72,3 @@ const NextDeliveryCard = ({ delivery, onStart, onComplete }) => {
 };
 
 export default NextDeliveryCard;
-

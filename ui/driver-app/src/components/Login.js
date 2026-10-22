@@ -15,7 +15,7 @@ const Login = ({ onSwitchToSignUp }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.driverName || !form.password) {
-      setError('Email and password are required.');
+      setError('Username and password are required.');
       return;
     }
     setLoading(true);
@@ -71,4 +71,3 @@ const Login = ({ onSwitchToSignUp }) => {
 };
 
 export default Login;
-

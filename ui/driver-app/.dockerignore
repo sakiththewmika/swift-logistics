@@ -1,0 +1,12 @@
+**/.env
+**/.env.*
+node_modules/
+build/
+coverage/
+.cache/
+.git/
+.gitignore
+.vscode/
+.idea/
+.DS_Store
+*.log

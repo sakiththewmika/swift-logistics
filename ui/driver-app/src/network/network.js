@@ -24,7 +24,7 @@ class Network {
     let json = null;
     try { json = text ? JSON.parse(text) : null; } catch { /* non-JSON */ }
     if (!res.ok) {
-      const err = new Error(json?.message || res.body);
+      const err = new Error(json?.message || text || `${res.status} ${res.statusText}`);
       err.status = res.status;
       err.data = json || text;
       console.log(`Response: ${res.status} ${res.statusText}`, err.data);

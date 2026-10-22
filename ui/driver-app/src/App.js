@@ -7,7 +7,7 @@ import CurrentLocationCard from './components/CurrentLocationCard';
 import StatusUpdateModal from './components/StatusUpdateModal';
 import { Truck, AlertTriangle } from 'lucide-react';
 import './AppStyles.css';
-import { getAssignedOrders } from './network/driver';
+import { getAssignedOrders, startDelivery, completeDelivery } from './network/driver';
 
 const MainDriverApp = () => {
   const { driver, logout } = useAuth();
@@ -24,20 +24,32 @@ const MainDriverApp = () => {
     }
   }, [driver]);
 
-  const nextDelivery = deliveries.find(d => d.status === 'ASSIGNED');
-  const completedCount = deliveries.filter(d => d.status === 'COMPLETED').length;
-  const pendingCount = deliveries.filter(d => d.status === 'ASSIGNED').length;
+  const nextDelivery = deliveries.find(d => d.status === 'ASSIGNED' || d.status === 'ROUTED');
+  const completedCount = deliveries.filter(d => d.status === 'COMPLETED' || d.status === 'DELIVERED').length;
+  const pendingCount = deliveries.filter(d => d.status === 'ASSIGNED' || d.status === 'ROUTED').length;
 
-  const updateDeliveryStatus = (orderId, newStatus) => {
-    setDeliveries(prev => prev.map(delivery =>
-      delivery.id === orderId
-        ? { ...delivery, status: newStatus }
-        : delivery
-    ));
-    setShowStatusUpdate(false);
-    setSelectedDelivery(null);
-    // Simulate pushing update to backend/message broker
-    console.log(`Status update sent: ${orderId} -> ${newStatus}`);
+  const updateDeliveryStatus = async (orderId, newStatus) => {
+    if (!orderId) return;
+
+    try {
+      if (newStatus === 'IN_TRANSIT') {
+        await startDelivery(orderId);
+      } else if (newStatus === 'COMPLETED') {
+        await completeDelivery(orderId);
+      } else {
+        return;
+      }
+
+      setDeliveries(prev => prev.map(delivery =>
+        (delivery.id ?? delivery.orderId) === orderId
+          ? { ...delivery, status: newStatus === 'COMPLETED' ? 'DELIVERED' : newStatus }
+          : delivery
+      ));
+      setShowStatusUpdate(false);
+      setSelectedDelivery(null);
+    } catch (error) {
+      console.error(`Failed to update delivery ${orderId}`, error);
+    }
   };
 
   const handleUpdateLocation = () => {
@@ -95,8 +107,8 @@ const MainDriverApp = () => {
       <div className="main">
         <NextDeliveryCard
           delivery={nextDelivery}
-          onStart={() => updateDeliveryStatus(nextDelivery?.id, 'IN_TRANSIT')}
-          onComplete={() => updateDeliveryStatus(nextDelivery?.id, 'COMPLETED')}
+          onStart={() => updateDeliveryStatus(nextDelivery?.id ?? nextDelivery?.orderId, 'IN_TRANSIT')}
+          onComplete={() => updateDeliveryStatus(nextDelivery?.id ?? nextDelivery?.orderId, 'COMPLETED')}
         />
         <DeliveriesList
           deliveries={deliveries}
@@ -111,9 +123,9 @@ const MainDriverApp = () => {
       </div>
       <StatusUpdateModal
         delivery={selectedDelivery}
-        onInTransit={() => updateDeliveryStatus(selectedDelivery?.id, 'IN_TRANSIT')}
-        onComplete={() => updateDeliveryStatus(selectedDelivery?.id, 'COMPLETED')}
-        onFail={() => updateDeliveryStatus(selectedDelivery?.id, 'FAILED')}
+        onInTransit={() => updateDeliveryStatus(selectedDelivery?.id ?? selectedDelivery?.orderId, 'IN_TRANSIT')}
+        onComplete={() => updateDeliveryStatus(selectedDelivery?.id ?? selectedDelivery?.orderId, 'COMPLETED')}
+        onFail={() => updateDeliveryStatus(selectedDelivery?.id ?? selectedDelivery?.orderId, 'FAILED')}
         onCancel={() => setShowStatusUpdate(false)}
       />
     </div>
