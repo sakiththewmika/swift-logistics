@@ -34,6 +34,9 @@ public class AuthController {
     }
     Customer customer = customerRepository.findCustomerByCustomerName(loginRequest.getUsername());
     if (customer == null) {
+      customer = customerRepository.findCustomerByCustomerEmail(loginRequest.getUsername());
+    }
+    if (customer == null) {
       return ResponseEntity.status(401).body("Customer not found");
     }
     if (!customer.getPassword().equals(loginRequest.getPassword())) {
@@ -46,13 +49,18 @@ public class AuthController {
 
   @PostMapping("/driver")
   public ResponseEntity<?> driverLogin(@RequestBody LoginRequest loginRequest) {
+    if (loginRequest.getUsername() == null || loginRequest.getUsername().isEmpty()) {
+      return ResponseEntity.status(400).body("Driver name is required");
+    }
+    if (loginRequest.getPassword() == null || loginRequest.getPassword().isEmpty()) {
+      return ResponseEntity.status(400).body("Password is required");
+    }
     Driver driver = driverRepository.findDriverByDriverName(loginRequest.getUsername());
-    // Mock driver authentication logic
     if (driver == null) {
       return ResponseEntity.status(401).body("Driver not found");
     }
     if (!driver.getPassword().equals(loginRequest.getPassword())) {
-      return ResponseEntity.ok("Invalid password");
+      return ResponseEntity.status(401).body("Invalid password");
     }
 
     driver.setAvailable(true);
@@ -71,7 +79,7 @@ public class AuthController {
       return ResponseEntity.status(401).body("Driver not found");
     }
     if (!driver.getPassword().equals(loginRequest.getPassword())) {
-      return ResponseEntity.ok("Invalid password");
+      return ResponseEntity.status(401).body("Invalid password");
     }
 
     driver.setAvailable(false);
