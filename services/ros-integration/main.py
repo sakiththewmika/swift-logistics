@@ -8,7 +8,7 @@ app = FastAPI(title="ROS Integration Service", version="1.0.0")
 async def startup_event():
     """On startup, create a background task to run the RabbitMQ consumer."""
     print("Service starting up...")
-    asyncio.create_task(start_consumer())
+    asyncio.create_task(asyncio.to_thread(asyncio.run, start_consumer()))
     print("Consumer task scheduled to run.")
 
 @app.get("/health", tags=["Monitoring"])
