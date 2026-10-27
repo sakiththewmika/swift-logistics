@@ -5,6 +5,7 @@ import httpx
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 from datetime import datetime, timezone
+from threading import Lock
 
 # --- Configuration ---
 # Using environment variables for configuration is a best practice.
@@ -30,6 +31,8 @@ client = AsyncIOMotorClient(MONGO_URI)
 db = client['swift-logic']  # Use the correct database name from the URI
 # --- UPDATED COLLECTION NAME ---
 drivers_collection = db.drivers
+processed_message_ids = set()
+processed_message_lock = Lock()
 
 
 async def start_consumer():
@@ -60,6 +63,11 @@ async def process_message(channel, method_frame, body):
     """Main logic for processing a single order message."""
     order_data = json.loads(body)
     order_id = order_data.get("orderId")
+    message_id = order_data.get("messageId") or order_id
+    with processed_message_lock:
+        if message_id in processed_message_ids:
+            channel.basic_ack(delivery_tag=method_frame.delivery_tag)
+            return
     print(f"Received routing request for Order ID: {order_id}")
 
     # 1. Find an available driver from the 'drivers' collection.
@@ -98,6 +106,7 @@ async def process_message(channel, method_frame, body):
 
     # 3. Publish the result back to the orchestrator.
     result_payload = json.dumps({
+        "messageId": message_id,
         "orderId": order_id,
         "status": "ROUTED",
         "waypoints": route_data.get("waypoints"),
@@ -110,3 +119,5 @@ async def process_message(channel, method_frame, body):
 
     # 4. Acknowledge the message was processed successfully.
     channel.basic_ack(delivery_tag=method_frame.delivery_tag)
+    with processed_message_lock:
+        processed_message_ids.add(message_id)

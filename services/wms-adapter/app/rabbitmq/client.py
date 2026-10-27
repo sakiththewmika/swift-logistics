@@ -6,6 +6,7 @@ class RabbitMQClient:
     def __init__(self):
         print("[RABBITMQ] Initializing RabbitMQ client...")
         self.lock = threading.Lock()
+        self.processed_message_ids = set()
 
         # Create a connection only for consuming (persistent)
         self.consumer_connection = pika.BlockingConnection(
@@ -67,8 +68,19 @@ class RabbitMQClient:
         self.consumer_channel.queue_declare(queue=queue, durable=True, arguments=queue_args)
 
         def on_message(ch, method, properties, body):
-            callback(json.loads(body.decode()))
-            ch.basic_ack(delivery_tag=method.delivery_tag)
+            message = json.loads(body.decode())
+            message_id = (properties.message_id if properties else None) or message.get("messageId") or message.get("orderId")
+            with self.lock:
+                if message_id in self.processed_message_ids:
+                    ch.basic_ack(delivery_tag=method.delivery_tag)
+                    return
+            try:
+                callback(message)
+                with self.lock:
+                    self.processed_message_ids.add(message_id)
+                ch.basic_ack(delivery_tag=method.delivery_tag)
+            except Exception:
+                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
 
         self.consumer_channel.basic_consume(queue=queue, on_message_callback=on_message)
         print(f"[RABBITMQ] Listening on {queue}...")
