@@ -56,4 +56,9 @@ public class Order {
     // Billing Information
     private Double totalAmount;
     private String billingStatus;
+
+
+    public String getId() {
+        return orderId;
+    }
 }

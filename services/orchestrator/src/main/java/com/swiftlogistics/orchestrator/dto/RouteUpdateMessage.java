@@ -13,6 +13,7 @@ import java.util.List;
 @NoArgsConstructor
 @Builder
 public class RouteUpdateMessage {
+    private String messageId;
     private String orderId;
     private String status; // "ROUTED", "FAILED", "OPTIMIZING"
     private List<String> waypoints;

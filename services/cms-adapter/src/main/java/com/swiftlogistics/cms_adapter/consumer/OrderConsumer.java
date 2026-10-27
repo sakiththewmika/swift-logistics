@@ -2,6 +2,8 @@ package com.swiftlogistics.cms_adapter.consumer;
 
 import com.swiftlogistics.cms_adapter.model.BillingUpdateMessage;
 import com.swiftlogistics.cms_adapter.wsdl.SubmitOrderResponse;
+import com.swiftlogistics.cms_adapter.wsdl.CancelInvoiceResponse;
+import com.swiftlogistics.cms_adapter.model.CompensateBillingMessage;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Service;
 
@@ -43,5 +45,17 @@ public class OrderConsumer {
                 .timestamp(LocalDateTime.now())
                 .build();
         billingUpdatePublisher.publishAck(message);
+    }
+
+    @RabbitListener(queues = RabbitMQConfig.QUEUE_BILLING_ROLLBACK)
+    public void compensateBilling(CompensateBillingMessage message) {
+        CancelInvoiceResponse response = cmsSoapClient.cancelInvoice(message.getOrderId());
+        BillingUpdateMessage update = BillingUpdateMessage.builder()
+                .orderId(response.getOrderId())
+                .status(response.getStatus())
+                .billedAmount(0D)
+                .timestamp(LocalDateTime.now())
+                .build();
+        billingUpdatePublisher.publishAck(update);
     }
 }

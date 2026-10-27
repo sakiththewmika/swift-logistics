@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.springframework.data.annotation.Id;
 
 import java.time.LocalDateTime;
 
@@ -12,6 +13,7 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @Builder
 public class OrderMessage {
+    @Id
     private String orderId;
     private String customerId;
     private String customerName;
@@ -22,5 +24,9 @@ public class OrderMessage {
     private String country;
     private Double totalAmount;
     private LocalDateTime timestamp;
+
+    public String getMessageId() {
+        return orderId;
+    }
 }
 

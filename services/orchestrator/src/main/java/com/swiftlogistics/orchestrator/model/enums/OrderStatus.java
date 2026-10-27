@@ -15,5 +15,6 @@ public enum OrderStatus {
     IN_TRANSIT,    // Package in transit
     DELIVERED,     // Delivery completed
     CANCELLED,     // Order cancelled
+    CANCELLED_REFUNDED,
     FAILED         // Order failed
 }

@@ -4,6 +4,8 @@ import java.math.BigDecimal;
 
 import com.swiftlogistics.cms_adapter.wsdl.SubmitOrderRequest;
 import com.swiftlogistics.cms_adapter.wsdl.SubmitOrderResponse;
+import com.swiftlogistics.cms_adapter.wsdl.CancelInvoiceRequest;
+import com.swiftlogistics.cms_adapter.wsdl.CancelInvoiceResponse;
 import org.springframework.ws.client.core.support.WebServiceGatewaySupport;
 
 import lombok.extern.slf4j.Slf4j;
@@ -25,5 +27,11 @@ public class CmsSoapClient extends WebServiceGatewaySupport {
         log.info("⬅️ Received SOAP response from CMS: {}", response.getStatus());
 
         return response;
+    }
+
+    public CancelInvoiceResponse cancelInvoice(String orderId) {
+        CancelInvoiceRequest request = new CancelInvoiceRequest();
+        request.setOrderId(orderId);
+        return (CancelInvoiceResponse) getWebServiceTemplate().marshalSendAndReceive(request);
     }
 }

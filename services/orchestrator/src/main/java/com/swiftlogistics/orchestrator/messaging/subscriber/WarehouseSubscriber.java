@@ -32,28 +32,17 @@ public class WarehouseSubscriber {
             log.info("Received warehouse update: orderId={}, status={}",
                     warehouseUpdate.getOrderId(), warehouseUpdate.getStatus());
 
-//            String status = warehouseUpdate.getStatus() != null ? warehouseUpdate.getStatus().trim().toUpperCase() : "";
-//
-//            log.info("test logz");
-//
-//            log.info("Normalized warehouse status: '{}', codepoints={}",
-//                status, status.chars()
-//                    .mapToObj(c -> String.format("\\u%04X", c))
-//                    .toList());
-//
-//
-//            // Process different warehouse statuses
-//            switch (status) {
-//                case "READY" -> handlePackageReady(warehouseUpdate);
-//                case "FAILED" -> handleWarehouseFailure(warehouseUpdate);
-//                case "PROCESSING" -> handleWarehouseProcessing(warehouseUpdate);
-//                default -> log.warn("Unknown warehouse status: {} for orderId: {}, codepoints: {}",
-//                        warehouseUpdate.getStatus(), warehouseUpdate.getOrderId(),
-//                        status.chars().mapToObj(c -> String.format("\\u%04X", c)).toList()
-//                );
-//            }
-
-            handlePackageReady(warehouseUpdate);
+            orderService.processWarehouseUpdate(warehouseUpdate);
+            if ("READY".equalsIgnoreCase(warehouseUpdate.getStatus())) {
+                ssePublisher.publishOrderStatusUpdate(warehouseUpdate.getOrderId(), OrderStatus.READY,
+                        "Package is ready for shipment");
+            } else if ("FAILED".equalsIgnoreCase(warehouseUpdate.getStatus())) {
+                ssePublisher.publishOrderStatusUpdate(warehouseUpdate.getOrderId(), OrderStatus.WAREHOUSE_FAILED,
+                        "Warehouse processing failed");
+            } else if ("PROCESSING".equalsIgnoreCase(warehouseUpdate.getStatus())) {
+                ssePublisher.publishOrderStatusUpdate(warehouseUpdate.getOrderId(), OrderStatus.PROCESSING,
+                        "Warehouse processing in progress");
+            }
 
         } catch (Exception e) {
             log.error("Error processing warehouse update: orderId={}",
@@ -63,61 +52,8 @@ public class WarehouseSubscriber {
             eventService.logFailedEvent(warehouseUpdate.getOrderId(),
                     EventType.WAREHOUSE_FAILED, EventSource.WMS_ADAPTER,
                     "Failed to process warehouse update: " + e.getMessage());
+            throw new IllegalStateException("Warehouse update processing failed", e);
         }
     }
 
-    private void handlePackageReady(WarehouseUpdateMessage warehouseUpdate) {
-        // Update order status to READY
-        orderService.updateOrderStatus(warehouseUpdate.getOrderId(), OrderStatus.READY);
-        
-        // Log package ready event
-        eventService.logSuccessEvent(warehouseUpdate.getOrderId(), EventType.PACKAGE_READY,
-                EventSource.WMS_ADAPTER, "Package is ready for shipment");
-
-        // Notify clients via SSE
-        ssePublisher.publishOrderStatusUpdate(
-                warehouseUpdate.getOrderId(), OrderStatus.READY, "Package is ready for shipment"
-        );
-
-        // Trigger route planning
-        orderService.requestRoutePlanning(warehouseUpdate.getOrderId());
-        
-        log.info("Package ready for orderId: {}, triggering route planning", warehouseUpdate.getOrderId());
-    }
-
-    private void handleWarehouseFailure(WarehouseUpdateMessage warehouseUpdate) {
-        // Update order status to WAREHOUSE_FAILED
-        orderService.updateOrderStatus(warehouseUpdate.getOrderId(), OrderStatus.WAREHOUSE_FAILED);
-
-        // Log warehouse failure event
-        eventService.logFailedEvent(warehouseUpdate.getOrderId(),
-                EventType.WAREHOUSE_FAILED, EventSource.WMS_ADAPTER,
-                "Warehouse processing failed: ");
-
-        // Notify clients via SSE
-        ssePublisher.publishOrderStatusUpdate(
-                warehouseUpdate.getOrderId(), OrderStatus.WAREHOUSE_FAILED, "Warehouse processing failed"
-        );
-        
-        log.error("Warehouse processing failed for orderId: {}, reason: {}", 
-                warehouseUpdate.getOrderId(), null);
-    }
-
-    private void handleWarehouseProcessing(WarehouseUpdateMessage warehouseUpdate) {
-        // Update order status to PROCESSING (optional, depending on business logic)
-         orderService.updateOrderStatus(warehouseUpdate.getOrderId(), OrderStatus.PROCESSING);
-
-        // Log processing status but don't change order status yet
-        eventService.logPendingEvent(
-                warehouseUpdate.getOrderId(), EventType.WAREHOUSE_PROCESSING,
-                EventSource.WMS_ADAPTER, "Warehouse processing in progress"
-        );
-
-        // Notify clients via SSE
-        ssePublisher.publishOrderStatusUpdate(
-                warehouseUpdate.getOrderId(), OrderStatus.PROCESSING, "Warehouse processing in progress"
-        );
-        
-        log.info("Warehouse processing for orderId: {}", warehouseUpdate.getOrderId());
-    }
 }

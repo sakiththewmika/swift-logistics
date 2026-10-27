@@ -12,6 +12,7 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @Builder
 public class BillingUpdateMessage {
+    private String messageId;
     private String orderId;
     private String status; // "BILLED", "FAILED", "PENDING"
     private Double billedAmount;

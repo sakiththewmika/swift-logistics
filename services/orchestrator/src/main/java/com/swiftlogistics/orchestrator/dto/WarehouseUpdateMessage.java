@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @Builder
 public class WarehouseUpdateMessage {
+    private String messageId;
     private String orderId;
     private String status;
 }
-

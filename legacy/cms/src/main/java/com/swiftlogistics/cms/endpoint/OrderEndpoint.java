@@ -8,6 +8,8 @@ import org.springframework.ws.server.endpoint.annotation.ResponsePayload;
 import com.swiftlogistics.cms.model.Order;
 import com.swiftlogistics.cms.model.SubmitOrderRequest;
 import com.swiftlogistics.cms.model.SubmitOrderResponse;
+import com.swiftlogistics.cms.model.CancelInvoiceRequest;
+import com.swiftlogistics.cms.model.CancelInvoiceResponse;
 import com.swiftlogistics.cms.service.OrderService;
 
 import lombok.RequiredArgsConstructor;
@@ -38,6 +40,16 @@ public class OrderEndpoint {
         response.setOrderId(order.getOrderId());
         response.setBilledAmount(order.getTotalAmount());
         log.info("Mock CMS - Returning SubmitOrderResponse: {}", response);
+        return response;
+    }
+
+    @PayloadRoot(namespace = NAMESPACE_URI, localPart = "CancelInvoiceRequest")
+    @ResponsePayload
+    public CancelInvoiceResponse cancelInvoice(@RequestPayload CancelInvoiceRequest request) {
+        CancelInvoiceResponse response = new CancelInvoiceResponse();
+        response.setStatus("CANCELLED_REFUNDED");
+        response.setOrderId(request.getOrderId());
+        response.setMessage("Invoice cancelled and refunded");
         return response;
     }
 }

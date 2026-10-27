@@ -1,21 +1,30 @@
 package com.swiftlogistics.orchestrator.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.swiftlogistics.orchestrator.dto.CreateOrderRequest;
 import com.swiftlogistics.orchestrator.dto.RouteRequestMessage;
 import com.swiftlogistics.orchestrator.model.Customer;
 import com.swiftlogistics.orchestrator.model.Order;
 import com.swiftlogistics.orchestrator.dto.OrderMessage;
 import com.swiftlogistics.orchestrator.dto.WarehouseRequestMessage;
+import com.swiftlogistics.orchestrator.dto.CompensateBillingMessage;
+import com.swiftlogistics.orchestrator.model.OutboxEvent;
+import com.swiftlogistics.orchestrator.model.ProcessedMessage;
 import com.swiftlogistics.orchestrator.model.enums.EventSource;
 import com.swiftlogistics.orchestrator.model.enums.EventType;
 import com.swiftlogistics.orchestrator.model.enums.OrderStatus;
+import com.swiftlogistics.orchestrator.model.enums.OutboxStatus;
 import com.swiftlogistics.orchestrator.repository.CustomerRepository;
 import com.swiftlogistics.orchestrator.repository.OrderRepository;
 import com.swiftlogistics.orchestrator.messaging.publisher.OrderPublisher;
+import com.swiftlogistics.orchestrator.repository.OutboxRepository;
+import com.swiftlogistics.orchestrator.repository.ProcessedMessageRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -27,12 +36,16 @@ public class OrderService {
 
     private final OrderRepository orderRepository;
     private final CustomerRepository customerRepository;
+    private final OutboxRepository outboxRepository;
     private final OrderPublisher orderPublisher;
     private final EventService eventService;
+    private final ObjectMapper objectMapper;
+    private final ProcessedMessageRepository processedMessageRepository;
 
     /**
      * Step 1: Create a new order and publish to order-created queue
      */
+    @Transactional
     public Order createOrder(CreateOrderRequest request) {
         try {
             // Create order entity
@@ -74,13 +87,17 @@ public class OrderService {
                     .timestamp(LocalDateTime.now())
                     .build();
 
-            // Publish to order-created queue for CMS Adapter
-            orderPublisher.publishOrderCreated(orderMessage);
-            
-            // Log order sent to CMS event
-            eventService.logSuccessEvent(
-                    savedOrder.getOrderId(), EventType.ORDER_SENT_TO_CMS, EventSource.ORCHESTRATOR, "Order sent to CMS for billing"
-            );
+            // Save to outbox for idempotency and async processing
+            OutboxEvent outbox = OutboxEvent.builder()
+                    .id(orderMessage.getMessageId())
+                    .aggregateId(order.getId())
+                    .exchange(com.swiftlogistics.orchestrator.config.RabbitMQConfig.EXCHANGE_ORDER_CREATED)
+                    .routingKey(com.swiftlogistics.orchestrator.config.RabbitMQConfig.ROUTING_KEY_ORDER_CREATED)
+                    .payloadJson(objectMapper.writeValueAsString(orderMessage))
+                    .status(OutboxStatus.PENDING)
+                    .createdAt(Instant.now())
+                    .build();
+            outboxRepository.save(outbox);
 
             log.info("Order created successfully: orderId={}",
                     savedOrder.getOrderId());
@@ -96,6 +113,7 @@ public class OrderService {
     /**
      * Update order status (called by billing/warehouse/route subscribers)
      */
+    @Transactional
     public void updateOrderStatus(String orderId, OrderStatus status) {
         try {
             Optional<Order> orderOpt = orderRepository.findById(orderId);
@@ -116,6 +134,7 @@ public class OrderService {
         }
     }
 
+    @Transactional
     public void updateOrderStatus(String orderId, OrderStatus status, String billingStatus, Double totalAmount) {
         try {
             Optional<Order> orderOpt = orderRepository.findById(orderId);
@@ -165,7 +184,9 @@ public class OrderService {
                     .build();
 
             // Publish to warehouse queue for WMS Adapter
-            orderPublisher.publishToWarehouse(warehouseRequest);
+            enqueue(warehouseRequest, orderId,
+                    com.swiftlogistics.orchestrator.config.RabbitMQConfig.EXCHANGE_WAREHOUSE,
+                    com.swiftlogistics.orchestrator.config.RabbitMQConfig.ROUTING_KEY_WAREHOUSE_REQUEST);
             
             // Log event
             eventService.logSuccessEvent(
@@ -205,7 +226,9 @@ public class OrderService {
                     .build();
 
             // Publish to route planning queue for ROS Adapter
-            orderPublisher.publishRoutePlanningRequest(routeRequest);
+            enqueue(routeRequest, orderId,
+                    com.swiftlogistics.orchestrator.config.RabbitMQConfig.EXCHANGE_ROUTE,
+                    com.swiftlogistics.orchestrator.config.RabbitMQConfig.ROUTING_KEY_ROUTE_PLANNING);
             
             // Log event
             eventService.logSuccessEvent(
@@ -235,6 +258,114 @@ public class OrderService {
      */
     public List<Order> getOrdersByCustomer(String customerId) {
         return orderRepository.findByCustomerId(customerId);
+    }
+
+    @Transactional
+    public boolean markMessageProcessed(String messageId) {
+        if (messageId == null || messageId.isBlank() || processedMessageRepository.existsById(messageId)) {
+            return false;
+        }
+        try {
+            processedMessageRepository.save(new ProcessedMessage(messageId, Instant.now()));
+            return true;
+        } catch (org.springframework.dao.DuplicateKeyException duplicate) {
+            return false;
+        }
+    }
+
+    @Transactional
+    public void processBillingUpdate(com.swiftlogistics.orchestrator.dto.BillingUpdateMessage update) {
+        if (!markMessageProcessed(update.getMessageId() != null ? update.getMessageId() : update.getOrderId())) return;
+        switch (update.getStatus()) {
+            case "BILLED" -> {
+                updateOrderStatus(update.getOrderId(), OrderStatus.BILLED, "COMPLETED", update.getBilledAmount());
+                eventService.logSuccessEvent(update.getOrderId(), EventType.BILLING_COMPLETED,
+                        EventSource.CMS_ADAPTER, "Billing completed successfully");
+                sendToWarehouse(update.getOrderId());
+            }
+            case "FAILED" -> {
+                updateOrderStatus(update.getOrderId(), OrderStatus.BILLING_FAILED, "FAILED", null);
+                eventService.logFailedEvent(update.getOrderId(), EventType.BILLING_FAILED,
+                        EventSource.CMS_ADAPTER, "Billing failed");
+            }
+            case "PENDING" -> eventService.logPendingEvent(update.getOrderId(), EventType.BILLING_PENDING,
+                    EventSource.CMS_ADAPTER, "Billing is pending");
+            case "CANCELLED_REFUNDED" -> {
+                updateOrderStatus(update.getOrderId(), OrderStatus.CANCELLED_REFUNDED, "CANCELLED_REFUNDED", 0D);
+                eventService.logSuccessEvent(update.getOrderId(), EventType.ORDER_CANCELLED,
+                        EventSource.CMS_ADAPTER, "Billing cancelled and refunded");
+            }
+            default -> throw new IllegalArgumentException("Unknown billing status: " + update.getStatus());
+        }
+    }
+
+    @Transactional
+    public void processWarehouseUpdate(com.swiftlogistics.orchestrator.dto.WarehouseUpdateMessage update) {
+        if (!markMessageProcessed(update.getMessageId() != null ? update.getMessageId() : update.getOrderId())) return;
+        String status = update.getStatus() == null ? "" : update.getStatus().trim().toUpperCase();
+        if ("FAILED".equals(status)) {
+            updateOrderStatus(update.getOrderId(), OrderStatus.WAREHOUSE_FAILED);
+            eventService.logFailedEvent(update.getOrderId(), EventType.WAREHOUSE_FAILED,
+                    EventSource.WMS_ADAPTER, "Warehouse processing failed");
+            CompensateBillingMessage compensation = CompensateBillingMessage.builder()
+                    .messageId(java.util.UUID.randomUUID().toString())
+                    .orderId(update.getOrderId())
+                    .reason("Warehouse processing failed")
+                    .timestamp(java.time.LocalDateTime.now())
+                    .build();
+            enqueue(compensation, update.getOrderId(),
+                    com.swiftlogistics.orchestrator.config.RabbitMQConfig.EXCHANGE_BILLING_UPDATES,
+                    com.swiftlogistics.orchestrator.config.RabbitMQConfig.ROUTING_KEY_BILLING_ROLLBACK);
+        } else if ("PROCESSING".equals(status)) {
+            updateOrderStatus(update.getOrderId(), OrderStatus.PROCESSING);
+            eventService.logPendingEvent(update.getOrderId(), EventType.WAREHOUSE_PROCESSING,
+                    EventSource.WMS_ADAPTER, "Warehouse processing in progress");
+        } else if ("READY".equals(status)) {
+            updateOrderStatus(update.getOrderId(), OrderStatus.READY);
+            eventService.logSuccessEvent(update.getOrderId(), EventType.PACKAGE_READY,
+                    EventSource.WMS_ADAPTER, "Package is ready for shipment");
+            requestRoutePlanning(update.getOrderId());
+        } else {
+            throw new IllegalArgumentException("Unknown warehouse status: " + update.getStatus());
+        }
+    }
+
+    @Transactional
+    public void processRouteUpdate(com.swiftlogistics.orchestrator.dto.RouteUpdateMessage update,
+                                   RouteService routeService) {
+        if (!markMessageProcessed(update.getMessageId() != null ? update.getMessageId() : update.getOrderId())) return;
+        String status = update.getStatus() == null ? "" : update.getStatus().trim().toUpperCase();
+        if ("ROUTED".equals(status)) {
+            routeService.createOrderRoute(update.getOrderId(), update.getWaypoints(),
+                    update.getDriverId(), update.getVehicleId());
+        } else if ("FAILED".equals(status)) {
+            updateOrderStatus(update.getOrderId(), OrderStatus.ROUTE_FAILED);
+            eventService.logFailedEvent(update.getOrderId(), EventType.ROUTE_FAILED,
+                    EventSource.ROS_ADAPTER, "Route planning failed");
+        } else if ("ROUTING".equals(status)) {
+            updateOrderStatus(update.getOrderId(), OrderStatus.ROUTING);
+            eventService.logPendingEvent(update.getOrderId(), EventType.ROUTE_PENDING,
+                    EventSource.ROS_ADAPTER, "Route planning is in progress");
+        } else {
+            throw new IllegalArgumentException("Unknown route status: " + update.getStatus());
+        }
+    }
+
+    private void enqueue(Object payload, String aggregateId, String exchange, String routingKey) {
+        try {
+            outboxRepository.save(OutboxEvent.builder()
+                    .id(java.util.UUID.randomUUID().toString())
+                    .aggregateId(aggregateId)
+                    .exchange(exchange)
+                    .routingKey(routingKey)
+                    .payloadJson(objectMapper.writeValueAsString(payload))
+                    .status(OutboxStatus.PENDING)
+                    .createdAt(Instant.now())
+                    .retryCount(0)
+                    .build());
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new IllegalStateException("Unable to serialize outbox message", e);
+        }
     }
 
 }
