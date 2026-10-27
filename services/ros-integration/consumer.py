@@ -1,9 +1,9 @@
 import pika
 import json
-import asyncio
 import httpx
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
+import asyncio
 from datetime import datetime, timezone
 from threading import Lock
 
@@ -97,12 +97,8 @@ async def process_message(channel, method_frame, body):
         }
     }
 
-    async with httpx.AsyncClient() as client:
-        response = await client.post(ROS_API_URL, json=ros_payload, timeout=15.0)
-        response.raise_for_status()  # Raise exception for non-200 responses
-        route_data = response.json()
-
-        print(f"ROS API response: {route_data}")
+    route_data = await call_ros_with_retry(ros_payload)
+    print(f"ROS API response: {route_data}")
 
     # 3. Publish the result back to the orchestrator.
     result_payload = json.dumps({
@@ -121,3 +117,21 @@ async def process_message(channel, method_frame, body):
     channel.basic_ack(delivery_tag=method_frame.delivery_tag)
     with processed_message_lock:
         processed_message_ids.add(message_id)
+
+
+async def call_ros_with_retry(payload):
+    last_error = None
+    for attempt in range(4):
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(ROS_API_URL, json=payload, timeout=15.0)
+                response.raise_for_status()
+                return response.json()
+        except httpx.TransportError as exc:
+            last_error = exc
+            if attempt == 3:
+                break
+            delay = 2 ** attempt
+            print(f"Transient ROS network error; retrying in {delay}s: {exc}")
+            await asyncio.sleep(delay)
+    raise RuntimeError("ROS request failed after transient retries") from last_error

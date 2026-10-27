@@ -37,8 +37,15 @@ public class WarehouseSubscriber {
                 ssePublisher.publishOrderStatusUpdate(warehouseUpdate.getOrderId(), OrderStatus.READY,
                         "Package is ready for shipment");
             } else if ("FAILED".equalsIgnoreCase(warehouseUpdate.getStatus())) {
-                ssePublisher.publishOrderStatusUpdate(warehouseUpdate.getOrderId(), OrderStatus.WAREHOUSE_FAILED,
-                        "Warehouse processing failed");
+                ssePublisher.publishOrderStatusUpdate(warehouseUpdate.getOrderId(),
+                        OrderStatus.COMPENSATING_BILLING,
+                        "Warehouse processing failed; billing compensation started");
+            } else if ("COMPENSATED".equalsIgnoreCase(warehouseUpdate.getStatus())
+                    || "PACKAGE_RELEASED".equalsIgnoreCase(warehouseUpdate.getStatus())
+                    || "WAREHOUSE_COMPENSATED".equalsIgnoreCase(warehouseUpdate.getStatus())) {
+                ssePublisher.publishOrderStatusUpdate(warehouseUpdate.getOrderId(),
+                        OrderStatus.COMPENSATING_BILLING,
+                        "Warehouse compensation completed; billing compensation started");
             } else if ("PROCESSING".equalsIgnoreCase(warehouseUpdate.getStatus())) {
                 ssePublisher.publishOrderStatusUpdate(warehouseUpdate.getOrderId(), OrderStatus.PROCESSING,
                         "Warehouse processing in progress");

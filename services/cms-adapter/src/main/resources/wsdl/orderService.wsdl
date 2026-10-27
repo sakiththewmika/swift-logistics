@@ -29,6 +29,8 @@
             </xsd:element>
             <xsd:element name="CancelInvoiceRequest"><xsd:complexType><xsd:sequence><xsd:element name="orderId" type="xsd:string"/></xsd:sequence></xsd:complexType></xsd:element>
             <xsd:element name="CancelInvoiceResponse"><xsd:complexType><xsd:sequence><xsd:element name="status" type="xsd:string"/><xsd:element name="message" type="xsd:string"/><xsd:element name="orderId" type="xsd:string"/></xsd:sequence></xsd:complexType></xsd:element>
+            <xsd:element name="CancelOrderBillingRequest"><xsd:complexType><xsd:sequence><xsd:element name="orderId" type="xsd:string"/></xsd:sequence></xsd:complexType></xsd:element>
+            <xsd:element name="CancelOrderBillingResponse"><xsd:complexType><xsd:sequence><xsd:element name="status" type="xsd:string"/><xsd:element name="message" type="xsd:string"/><xsd:element name="orderId" type="xsd:string"/></xsd:sequence></xsd:complexType></xsd:element>
         </xsd:schema>
     </wsdl:types>
 
@@ -41,6 +43,8 @@
     </wsdl:message>
     <wsdl:message name="CancelInvoiceRequest"><wsdl:part name="parameters" element="tns:CancelInvoiceRequest"/></wsdl:message>
     <wsdl:message name="CancelInvoiceResponse"><wsdl:part name="parameters" element="tns:CancelInvoiceResponse"/></wsdl:message>
+    <wsdl:message name="CancelOrderBillingRequest"><wsdl:part name="parameters" element="tns:CancelOrderBillingRequest"/></wsdl:message>
+    <wsdl:message name="CancelOrderBillingResponse"><wsdl:part name="parameters" element="tns:CancelOrderBillingResponse"/></wsdl:message>
 
     <wsdl:portType name="OrderPortType">
         <wsdl:operation name="SubmitOrder">
@@ -48,6 +52,7 @@
             <wsdl:output message="tns:SubmitOrderResponse"/>
         </wsdl:operation>
         <wsdl:operation name="CancelInvoice"><wsdl:input message="tns:CancelInvoiceRequest"/><wsdl:output message="tns:CancelInvoiceResponse"/></wsdl:operation>
+        <wsdl:operation name="CancelOrderBilling"><wsdl:input message="tns:CancelOrderBillingRequest"/><wsdl:output message="tns:CancelOrderBillingResponse"/></wsdl:operation>
     </wsdl:portType>
 
     <wsdl:binding name="OrderBinding" type="tns:OrderPortType">
@@ -62,6 +67,7 @@
             </wsdl:output>
         </wsdl:operation>
         <wsdl:operation name="CancelInvoice"><soap:operation soapAction=""/><wsdl:input><soap:body use="literal"/></wsdl:input><wsdl:output><soap:body use="literal"/></wsdl:output></wsdl:operation>
+        <wsdl:operation name="CancelOrderBilling"><soap:operation soapAction=""/><wsdl:input><soap:body use="literal"/></wsdl:input><wsdl:output><soap:body use="literal"/></wsdl:output></wsdl:operation>
     </wsdl:binding>
 
     <wsdl:service name="OrderService">

@@ -8,6 +8,7 @@ import com.swiftlogistics.orchestrator.model.Order;
 import com.swiftlogistics.orchestrator.dto.OrderMessage;
 import com.swiftlogistics.orchestrator.dto.WarehouseRequestMessage;
 import com.swiftlogistics.orchestrator.dto.CompensateBillingMessage;
+import com.swiftlogistics.orchestrator.dto.CompensateWarehouseMessage;
 import com.swiftlogistics.orchestrator.model.OutboxEvent;
 import com.swiftlogistics.orchestrator.model.ProcessedMessage;
 import com.swiftlogistics.orchestrator.model.enums.EventSource;
@@ -218,6 +219,7 @@ public class OrderService {
             
             // Create route planning request
             RouteRequestMessage routeRequest = RouteRequestMessage.builder()
+                    .messageId(java.util.UUID.randomUUID().toString())
                     .orderId(orderId)
                     .deliveryAddress(order.getDeliveryAddress())
                     .city(order.getCity())
@@ -295,6 +297,12 @@ public class OrderService {
                 eventService.logSuccessEvent(update.getOrderId(), EventType.ORDER_CANCELLED,
                         EventSource.CMS_ADAPTER, "Billing cancelled and refunded");
             }
+            case "BILLING_REFUNDED" -> {
+                updateOrderStatus(update.getOrderId(), OrderStatus.CANCELLED_REFUNDED,
+                        "CANCELLED_REFUNDED", 0D);
+                eventService.logSuccessEvent(update.getOrderId(), EventType.ORDER_CANCELLED,
+                        EventSource.CMS_ADAPTER, "Billing compensation completed");
+            }
             default -> throw new IllegalArgumentException("Unknown billing status: " + update.getStatus());
         }
     }
@@ -307,15 +315,12 @@ public class OrderService {
             updateOrderStatus(update.getOrderId(), OrderStatus.WAREHOUSE_FAILED);
             eventService.logFailedEvent(update.getOrderId(), EventType.WAREHOUSE_FAILED,
                     EventSource.WMS_ADAPTER, "Warehouse processing failed");
-            CompensateBillingMessage compensation = CompensateBillingMessage.builder()
-                    .messageId(java.util.UUID.randomUUID().toString())
-                    .orderId(update.getOrderId())
-                    .reason("Warehouse processing failed")
-                    .timestamp(java.time.LocalDateTime.now())
-                    .build();
-            enqueue(compensation, update.getOrderId(),
-                    com.swiftlogistics.orchestrator.config.RabbitMQConfig.EXCHANGE_BILLING_UPDATES,
-                    com.swiftlogistics.orchestrator.config.RabbitMQConfig.ROUTING_KEY_BILLING_ROLLBACK);
+            beginBillingCompensation(update.getOrderId(), "Warehouse processing failed");
+        } else if ("COMPENSATED".equals(status) || "PACKAGE_RELEASED".equals(status)
+                || "WAREHOUSE_COMPENSATED".equals(status)) {
+            eventService.logSuccessEvent(update.getOrderId(), EventType.WAREHOUSE_FAILED,
+                    EventSource.WMS_ADAPTER, "Warehouse compensation completed");
+            beginBillingCompensation(update.getOrderId(), "Warehouse compensation completed");
         } else if ("PROCESSING".equals(status)) {
             updateOrderStatus(update.getOrderId(), OrderStatus.PROCESSING);
             eventService.logPendingEvent(update.getOrderId(), EventType.WAREHOUSE_PROCESSING,
@@ -328,6 +333,34 @@ public class OrderService {
         } else {
             throw new IllegalArgumentException("Unknown warehouse status: " + update.getStatus());
         }
+    }
+
+    @Transactional
+    public void beginWarehouseCompensation(String orderId, String reason) {
+        updateOrderStatus(orderId, OrderStatus.COMPENSATING_WAREHOUSE);
+        CompensateWarehouseMessage compensation = CompensateWarehouseMessage.builder()
+                .messageId(java.util.UUID.randomUUID().toString())
+                .orderId(orderId)
+                .reason(reason)
+                .timestamp(java.time.LocalDateTime.now())
+                .build();
+        enqueue(compensation, orderId,
+                com.swiftlogistics.orchestrator.config.RabbitMQConfig.EXCHANGE_WAREHOUSE,
+                com.swiftlogistics.orchestrator.config.RabbitMQConfig.ROUTING_KEY_WAREHOUSE_COMPENSATION);
+    }
+
+    @Transactional
+    public void beginBillingCompensation(String orderId, String reason) {
+        updateOrderStatus(orderId, OrderStatus.COMPENSATING_BILLING);
+        CompensateBillingMessage compensation = CompensateBillingMessage.builder()
+                .messageId(java.util.UUID.randomUUID().toString())
+                .orderId(orderId)
+                .reason(reason)
+                .timestamp(java.time.LocalDateTime.now())
+                .build();
+        enqueue(compensation, orderId,
+                com.swiftlogistics.orchestrator.config.RabbitMQConfig.EXCHANGE_BILLING_UPDATES,
+                com.swiftlogistics.orchestrator.config.RabbitMQConfig.ROUTING_KEY_BILLING_COMPENSATION);
     }
 
     @Transactional

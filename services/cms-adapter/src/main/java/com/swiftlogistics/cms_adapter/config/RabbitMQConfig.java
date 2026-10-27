@@ -22,6 +22,8 @@ public class RabbitMQConfig {
     public static final String ROUTING_KEY_BILLING_UPDATES = "billing.updated";
     public static final String QUEUE_BILLING_ROLLBACK = "billing-rollback";
     public static final String ROUTING_KEY_BILLING_ROLLBACK = "billing.rollback";
+    public static final String QUEUE_BILLING_COMPENSATION = "billing-compensation";
+    public static final String ROUTING_KEY_BILLING_COMPENSATION = "billing.compensation";
 
     // Dead-letter queues
     public static final String DLQ_SUFFIX = ".dlq";
@@ -71,5 +73,20 @@ public class RabbitMQConfig {
     @Bean
     public Binding bindingBillingRollback() {
         return BindingBuilder.bind(billingRollbackQueue()).to(billingUpdatesExchange()).with(ROUTING_KEY_BILLING_ROLLBACK);
+    }
+
+    @Bean
+    public Queue billingCompensationQueue() {
+        return QueueBuilder.durable(QUEUE_BILLING_COMPENSATION)
+                .withArgument("x-dead-letter-exchange", EXCHANGE_BILLING_UPDATES + DLX_SUFFIX)
+                .withArgument("x-dead-letter-routing-key", QUEUE_BILLING_COMPENSATION + DLQ_SUFFIX)
+                .build();
+    }
+
+    @Bean
+    public Binding bindingBillingCompensation() {
+        return BindingBuilder.bind(billingCompensationQueue())
+                .to(billingUpdatesExchange())
+                .with(ROUTING_KEY_BILLING_COMPENSATION);
     }
 }

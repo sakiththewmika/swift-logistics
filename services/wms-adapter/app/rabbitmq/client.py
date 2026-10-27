@@ -7,9 +7,13 @@ class RabbitMQClient:
         print("[RABBITMQ] Initializing RabbitMQ client...")
         self.lock = threading.Lock()
         self.processed_message_ids = set()
+        self.retry_counts = {}
 
         # Create a connection only for consuming (persistent)
-        self.consumer_connection = pika.BlockingConnection(
+        self.consumer_connections = []
+
+    def _new_connection(self):
+        return pika.BlockingConnection(
             pika.ConnectionParameters(
                 host=os.getenv("RABBITMQ_HOST", "swift-rabbitmq"),
                 port=int(os.getenv("RABBITMQ_PORT", 5672)),
@@ -19,7 +23,6 @@ class RabbitMQClient:
                 )
             )
         )
-        self.consumer_channel = self.consumer_connection.channel()
 
     def _new_publish_channel(self):
         """Create a short-lived connection + channel just for publishing."""
@@ -38,9 +41,6 @@ class RabbitMQClient:
 
     def publish(self, queue, message):
         """Publish using a fresh connection to avoid thread issues."""
-        if message["status"] != "READY":
-            print(f"[RABBITMQ] Skipping publish for non-READY status: {message}")
-            return
         connection, channel = self._new_publish_channel()
         try:
             queue_args = {
@@ -48,12 +48,20 @@ class RabbitMQClient:
                 "x-dead-letter-routing-key": "warehouse-updates.dlq"
             }
             channel.queue_declare(queue=queue, durable=True, arguments=queue_args)
-            channel.basic_publish(
-                exchange="",
-                routing_key=queue,
-                body=json.dumps(message),
-                properties=pika.BasicProperties(delivery_mode=2)
-            )
+            for attempt in range(4):
+                try:
+                    channel.basic_publish(
+                        exchange="",
+                        routing_key=queue,
+                        body=json.dumps(message),
+                        properties=pika.BasicProperties(delivery_mode=2)
+                    )
+                    break
+                except (pika.exceptions.AMQPConnectionError, OSError):
+                    if attempt == 3:
+                        raise
+                    import time
+                    time.sleep(2 ** attempt)
             print(f"[RABBITMQ] Published to {queue}: {message}")
         finally:
             channel.close()
@@ -63,9 +71,12 @@ class RabbitMQClient:
         """Consume with a persistent connection/channel in a dedicated thread."""
         queue_args = {
             "x-dead-letter-exchange": "warehouse.exchange.dlx",
-            "x-dead-letter-routing-key": "warehouse-queue.dlq"
+            "x-dead-letter-routing-key": f"{queue}.dlq"
         }
-        self.consumer_channel.queue_declare(queue=queue, durable=True, arguments=queue_args)
+        connection = self._new_connection()
+        channel = connection.channel()
+        self.consumer_connections.append(connection)
+        channel.queue_declare(queue=queue, durable=True, arguments=queue_args)
 
         def on_message(ch, method, properties, body):
             message = json.loads(body.decode())
@@ -78,14 +89,28 @@ class RabbitMQClient:
                 callback(message)
                 with self.lock:
                     self.processed_message_ids.add(message_id)
+                    self.retry_counts.pop(message_id, None)
                 ch.basic_ack(delivery_tag=method.delivery_tag)
-            except Exception:
-                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+            except (RuntimeError, OSError) as exc:
+                with self.lock:
+                    retries = self.retry_counts.get(message_id, 0) + 1
+                    self.retry_counts[message_id] = retries
+                should_retry = retries < 4
+                print(f"[RABBITMQ] Transient adapter failure (attempt {retries}/4): {exc}")
+                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=should_retry)
+            except Exception as exc:
+                print(f"[RABBITMQ] Non-retryable message failure: {exc}")
+                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
-        self.consumer_channel.basic_consume(queue=queue, on_message_callback=on_message)
+        channel.basic_consume(queue=queue, on_message_callback=on_message)
         print(f"[RABBITMQ] Listening on {queue}...")
-        self.consumer_channel.start_consuming()
+        try:
+            channel.start_consuming()
+        finally:
+            if connection.is_open:
+                connection.close()
 
     def close(self):
-        if self.consumer_connection and self.consumer_connection.is_open:
-            self.consumer_connection.close()
+        for connection in self.consumer_connections:
+            if connection.is_open:
+                connection.close()

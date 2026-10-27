@@ -10,6 +10,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @Builder
 public class RouteRequestMessage {
+    private String messageId;
     private String orderId;
     private String deliveryAddress;
     private String city;

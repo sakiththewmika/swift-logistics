@@ -3,6 +3,8 @@ package com.swiftlogistics.orchestrator.config;
 import org.springframework.amqp.core.*;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import java.util.ArrayList;
+import java.util.List;
 
 @Configuration
 public class RabbitMQConfig {
@@ -20,6 +22,8 @@ public class RabbitMQConfig {
     public static final String ROUTING_KEY_BILLING_UPDATES = "billing.updated";
     public static final String QUEUE_BILLING_ROLLBACK = "billing-rollback";
     public static final String ROUTING_KEY_BILLING_ROLLBACK = "billing.rollback";
+    public static final String QUEUE_BILLING_COMPENSATION = "billing-compensation";
+    public static final String ROUTING_KEY_BILLING_COMPENSATION = "billing.compensation";
     
     // Step 3: Warehouse Operations
     public static final String QUEUE_WAREHOUSE_QUEUE = "warehouse-queue";
@@ -27,6 +31,8 @@ public class RabbitMQConfig {
     public static final String EXCHANGE_WAREHOUSE = "warehouse.exchange";
     public static final String ROUTING_KEY_WAREHOUSE_REQUEST = "warehouse.request";
     public static final String ROUTING_KEY_WAREHOUSE_UPDATE = "warehouse.update";
+    public static final String QUEUE_WAREHOUSE_COMPENSATION = "warehouse-compensation";
+    public static final String ROUTING_KEY_WAREHOUSE_COMPENSATION = "warehouse.compensation";
     
     // Step 4: Route Planning
     public static final String QUEUE_ROUTE_PLANNING = "route-planning";
@@ -88,6 +94,14 @@ public class RabbitMQConfig {
     public Binding bindingBillingRollback() {
         return BindingBuilder.bind(billingRollbackQueue()).to(billingUpdatesExchange()).with(ROUTING_KEY_BILLING_ROLLBACK);
     }
+
+    @Bean
+    public Queue billingCompensationQueue() {
+        return QueueBuilder.durable(QUEUE_BILLING_COMPENSATION)
+                .withArgument("x-dead-letter-exchange", EXCHANGE_BILLING_UPDATES + DLX_SUFFIX)
+                .withArgument("x-dead-letter-routing-key", QUEUE_BILLING_COMPENSATION + DLQ_SUFFIX)
+                .build();
+    }
     
     @Bean
     public Queue warehouseQueueRequest() {
@@ -102,6 +116,14 @@ public class RabbitMQConfig {
         return QueueBuilder.durable(QUEUE_WAREHOUSE_UPDATES)
                 .withArgument("x-dead-letter-exchange", EXCHANGE_WAREHOUSE + DLX_SUFFIX)
                 .withArgument("x-dead-letter-routing-key", QUEUE_WAREHOUSE_UPDATES + DLQ_SUFFIX)
+                .build();
+    }
+
+    @Bean
+    public Queue warehouseCompensationQueue() {
+        return QueueBuilder.durable(QUEUE_WAREHOUSE_COMPENSATION)
+                .withArgument("x-dead-letter-exchange", EXCHANGE_WAREHOUSE + DLX_SUFFIX)
+                .withArgument("x-dead-letter-routing-key", QUEUE_WAREHOUSE_COMPENSATION + DLQ_SUFFIX)
                 .build();
     }
     
@@ -142,6 +164,20 @@ public class RabbitMQConfig {
     public Binding bindingWarehouseUpdates() {
         return BindingBuilder.bind(warehouseUpdatesQueue()).to(warehouseExchange()).with(ROUTING_KEY_WAREHOUSE_UPDATE);
     }
+
+    @Bean
+    public Binding bindingBillingCompensation() {
+        return BindingBuilder.bind(billingCompensationQueue())
+                .to(billingUpdatesExchange())
+                .with(ROUTING_KEY_BILLING_COMPENSATION);
+    }
+
+    @Bean
+    public Binding bindingWarehouseCompensation() {
+        return BindingBuilder.bind(warehouseCompensationQueue())
+                .to(warehouseExchange())
+                .with(ROUTING_KEY_WAREHOUSE_COMPENSATION);
+    }
     
     @Bean
     public Binding bindingRoutePlanning() {
@@ -151,5 +187,30 @@ public class RabbitMQConfig {
     @Bean
     public Binding bindingRouteUpdates() {
         return BindingBuilder.bind(routeUpdatesQueue()).to(routeExchange()).with(ROUTING_KEY_ROUTE_UPDATE);
+    }
+
+    @Bean
+    public Declarables deadLetterTopology() {
+        String[][] queues = {
+                {QUEUE_ORDER_CREATED, EXCHANGE_ORDER_CREATED},
+                {QUEUE_BILLING_UPDATES, EXCHANGE_BILLING_UPDATES},
+                {QUEUE_BILLING_ROLLBACK, EXCHANGE_BILLING_UPDATES},
+                {QUEUE_BILLING_COMPENSATION, EXCHANGE_BILLING_UPDATES},
+                {QUEUE_WAREHOUSE_QUEUE, EXCHANGE_WAREHOUSE},
+                {QUEUE_WAREHOUSE_UPDATES, EXCHANGE_WAREHOUSE},
+                {QUEUE_WAREHOUSE_COMPENSATION, EXCHANGE_WAREHOUSE},
+                {QUEUE_ROUTE_PLANNING, EXCHANGE_ROUTE},
+                {QUEUE_ROUTE_UPDATES, EXCHANGE_ROUTE}
+        };
+        List<Declarable> declarables = new ArrayList<>();
+        for (String[] entry : queues) {
+            String queueName = entry[0] + DLQ_SUFFIX;
+            DirectExchange exchange = new DirectExchange(entry[1] + DLX_SUFFIX, true, false);
+            Queue queue = QueueBuilder.durable(queueName).build();
+            declarables.add(exchange);
+            declarables.add(queue);
+            declarables.add(BindingBuilder.bind(queue).to(exchange).with(queueName));
+        }
+        return new Declarables(declarables);
     }
 }

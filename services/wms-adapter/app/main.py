@@ -1,5 +1,6 @@
 import os
 import threading
+import uuid
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -24,13 +25,30 @@ def health():
 
 def handle_message(message):
     parsed_mssg = parse_string_to_dict(message)
+    parsed_mssg["messageId"] = str(uuid.uuid4())
     print(f"[WMS-ADAPTER] Parsed WMS message: {parsed_mssg}")
     # publish_to_queue("wms", parsed_mssg)
     rabbitmq_client.publish("warehouse-updates", parsed_mssg)
 
+def handle_compensation(message):
+    parsed_message = parse_string_to_dict(message)
+    if parsed_message.get("status") != "PACKAGE_RELEASED":
+        raise ValueError(f"Unexpected WMS compensation response: {message}")
+    rabbitmq_client.publish("warehouse-updates", {
+        "messageId": str(uuid.uuid4()),
+        "orderId": parsed_message["orderId"],
+        "status": "PACKAGE_RELEASED"
+    })
+
 def process_order(message):
     parsed_order = parse_dict_to_string(message)
     wms_client.send_order(parsed_order)
+
+def process_compensation(message):
+    order_id = message.get("orderId")
+    if not order_id:
+        raise ValueError("Warehouse compensation message is missing orderId")
+    wms_client.cancel_package(order_id)
 
 
 def start_wms_listener():
@@ -41,6 +59,12 @@ def start_wms_listener():
     consumer = threading.Thread(target=rabbitmq_client.consume, args=("warehouse-queue", process_order))
     consumer.daemon = True
     consumer.start()
+    compensation_consumer = threading.Thread(
+        target=rabbitmq_client.consume,
+        args=("warehouse-compensation", process_compensation)
+    )
+    compensation_consumer.daemon = True
+    compensation_consumer.start()
 
 @app.on_event("startup")
 def startup_event():

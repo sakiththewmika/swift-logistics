@@ -16,5 +16,7 @@ public enum OrderStatus {
     DELIVERED,     // Delivery completed
     CANCELLED,     // Order cancelled
     CANCELLED_REFUNDED,
-    FAILED         // Order failed
+    FAILED,         // Order failed
+    COMPENSATING_WAREHOUSE, // Releasing package in WMS
+    COMPENSATING_BILLING,   // Refunding customer in CMS
 }

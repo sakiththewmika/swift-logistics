@@ -10,6 +10,8 @@ import com.swiftlogistics.cms.model.SubmitOrderRequest;
 import com.swiftlogistics.cms.model.SubmitOrderResponse;
 import com.swiftlogistics.cms.model.CancelInvoiceRequest;
 import com.swiftlogistics.cms.model.CancelInvoiceResponse;
+import com.swiftlogistics.cms.model.CancelOrderBillingRequest;
+import com.swiftlogistics.cms.model.CancelOrderBillingResponse;
 import com.swiftlogistics.cms.service.OrderService;
 
 import lombok.RequiredArgsConstructor;
@@ -50,6 +52,16 @@ public class OrderEndpoint {
         response.setStatus("CANCELLED_REFUNDED");
         response.setOrderId(request.getOrderId());
         response.setMessage("Invoice cancelled and refunded");
+        return response;
+    }
+
+    @PayloadRoot(namespace = NAMESPACE_URI, localPart = "CancelOrderBillingRequest")
+    @ResponsePayload
+    public CancelOrderBillingResponse cancelOrderBilling(@RequestPayload CancelOrderBillingRequest request) {
+        CancelOrderBillingResponse response = new CancelOrderBillingResponse();
+        response.setStatus("BILLING_REFUNDED");
+        response.setOrderId(request.getOrderId());
+        response.setMessage("Order billing cancelled and refunded");
         return response;
     }
 }

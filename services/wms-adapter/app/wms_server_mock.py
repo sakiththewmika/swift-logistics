@@ -24,6 +24,14 @@ def handle_client(conn, addr):
                     line = line.strip()
                     if not line:
                         continue
+                    if line.startswith("CANCEL_PACKAGE|"):
+                        order_id = line.split("|", 1)[1].strip()
+                        threading.Thread(
+                            target=simulate_compensation,
+                            args=(conn, order_id),
+                            daemon=True
+                        ).start()
+                        continue
                     if ':' in line:
                         order_id, event = line.split(':', 1)
                         order_id = order_id.strip('"')
@@ -31,7 +39,7 @@ def handle_client(conn, addr):
                         print(f"[MOCK-WMS] Received order: {line}")
                         threading.Thread(
                             target=simulate_processing,
-                            args=(conn, order_id, line),
+                            args=(conn, order_id),
                             daemon=True
                         ).start()
                     else:
@@ -40,17 +48,23 @@ def handle_client(conn, addr):
                 print("[MOCK-WMS] Client disconnected unexpectedly.")
                 break
 
+def simulate_compensation(conn, order_id):
+    time.sleep(1)
+    try:
+        conn.sendall((f"PACKAGE_RELEASED|{order_id}\n").encode())
+        print(f"[MOCK-WMS] Sent: PACKAGE_RELEASED|{order_id}")
+    except (BrokenPipeError, OSError):
+        print("[MOCK-WMS] Failed to send compensation response.")
 
-def simulate_processing(conn, order_id, original_line):
+
+def simulate_processing(conn, order_id):
     time.sleep(3)
-    messages = [f"{order_id}:READY", original_line]
-    for msg in messages:
-        try:
-            conn.sendall((msg + "\n").encode())
-            print(f"[MOCK-WMS] Sent: {msg}")
-        except (BrokenPipeError, OSError):
-            print("[MOCK-WMS] Failed to send data back. Connection might be closed.")
-            break
+    try:
+        message = f"{order_id}:READY"
+        conn.sendall((message + "\n").encode())
+        print(f"[MOCK-WMS] Sent: {message}")
+    except (BrokenPipeError, OSError):
+        print("[MOCK-WMS] Failed to send data back. Connection might be closed.")
 
 
 def start_server():

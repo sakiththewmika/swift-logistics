@@ -6,6 +6,8 @@ import com.swiftlogistics.cms_adapter.wsdl.SubmitOrderRequest;
 import com.swiftlogistics.cms_adapter.wsdl.SubmitOrderResponse;
 import com.swiftlogistics.cms_adapter.wsdl.CancelInvoiceRequest;
 import com.swiftlogistics.cms_adapter.wsdl.CancelInvoiceResponse;
+import com.swiftlogistics.cms_adapter.wsdl.CancelOrderBillingRequest;
+import com.swiftlogistics.cms_adapter.wsdl.CancelOrderBillingResponse;
 import org.springframework.ws.client.core.support.WebServiceGatewaySupport;
 
 import lombok.extern.slf4j.Slf4j;
@@ -33,5 +35,11 @@ public class CmsSoapClient extends WebServiceGatewaySupport {
         CancelInvoiceRequest request = new CancelInvoiceRequest();
         request.setOrderId(orderId);
         return (CancelInvoiceResponse) getWebServiceTemplate().marshalSendAndReceive(request);
+    }
+
+    public CancelOrderBillingResponse cancelOrderBilling(String orderId) {
+        CancelOrderBillingRequest request = new CancelOrderBillingRequest();
+        request.setOrderId(orderId);
+        return (CancelOrderBillingResponse) getWebServiceTemplate().marshalSendAndReceive(request);
     }
 }

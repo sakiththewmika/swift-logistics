@@ -3,6 +3,7 @@ package com.swiftlogistics.cms_adapter.consumer;
 import com.swiftlogistics.cms_adapter.model.BillingUpdateMessage;
 import com.swiftlogistics.cms_adapter.wsdl.SubmitOrderResponse;
 import com.swiftlogistics.cms_adapter.wsdl.CancelInvoiceResponse;
+import com.swiftlogistics.cms_adapter.wsdl.CancelOrderBillingResponse;
 import com.swiftlogistics.cms_adapter.model.CompensateBillingMessage;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Service;
@@ -17,6 +18,9 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import org.springframework.retry.annotation.Backoff;
+import org.springframework.retry.annotation.Retryable;
+import org.springframework.ws.client.WebServiceIOException;
 
 @Service
 @RequiredArgsConstructor
@@ -27,6 +31,11 @@ public class OrderConsumer {
     private final BillingUpdatePublisher billingUpdatePublisher;
 
     @RabbitListener(queues = RabbitMQConfig.QUEUE_ORDER_CREATED)
+    @Retryable(
+            retryFor = {WebServiceIOException.class},
+            maxAttempts = 4,
+            backoff = @Backoff(delay = 1000, multiplier = 2.0, maxDelay = 10000)
+    )
     public void consumeOrder(OrderMessage orderMessage) {
         log.info(" Received Order from Orchestrator: {}", orderMessage);
 
@@ -48,8 +57,13 @@ public class OrderConsumer {
     }
 
     @RabbitListener(queues = RabbitMQConfig.QUEUE_BILLING_ROLLBACK)
+    @Retryable(
+            retryFor = {WebServiceIOException.class},
+            maxAttempts = 4,
+            backoff = @Backoff(delay = 1000, multiplier = 2.0, maxDelay = 10000)
+    )
     public void compensateBilling(CompensateBillingMessage message) {
-        CancelInvoiceResponse response = cmsSoapClient.cancelInvoice(message.getOrderId());
+        CancelOrderBillingResponse response = cmsSoapClient.cancelOrderBilling(message.getOrderId());
         BillingUpdateMessage update = BillingUpdateMessage.builder()
                 .orderId(response.getOrderId())
                 .status(response.getStatus())
@@ -57,5 +71,22 @@ public class OrderConsumer {
                 .timestamp(LocalDateTime.now())
                 .build();
         billingUpdatePublisher.publishAck(update);
+    }
+
+    @RabbitListener(queues = RabbitMQConfig.QUEUE_BILLING_COMPENSATION)
+    @Retryable(
+            retryFor = {WebServiceIOException.class},
+            maxAttempts = 4,
+            backoff = @Backoff(delay = 1000, multiplier = 2.0, maxDelay = 10000)
+    )
+    public void compensateBillingWithDedicatedQueue(CompensateBillingMessage message) {
+        CancelOrderBillingResponse response = cmsSoapClient.cancelOrderBilling(message.getOrderId());
+        billingUpdatePublisher.publishAck(BillingUpdateMessage.builder()
+                .messageId(message.getMessageId())
+                .orderId(response.getOrderId())
+                .status(response.getStatus())
+                .billedAmount(0D)
+                .timestamp(LocalDateTime.now())
+                .build());
     }
 }

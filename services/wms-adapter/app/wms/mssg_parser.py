@@ -4,6 +4,12 @@ def parse_string_to_dict(raw_msg):
     Example: "ORD345:SHIPPED" -> {"orderId": "12345", "status": "SHIPPED"}
     """
     try:
+        if raw_msg.startswith("PACKAGE_RELEASED|"):
+            status, order_id = raw_msg.split("|", 1)
+            return {"orderId": order_id, "status": status}
+        if "|" in raw_msg:
+            order_id, status = raw_msg.split("|", 1)
+            return {"orderId": order_id, "status": status}
         order_id, status = raw_msg.split(":")
         return {"orderId": order_id, "status": status}
     except ValueError:

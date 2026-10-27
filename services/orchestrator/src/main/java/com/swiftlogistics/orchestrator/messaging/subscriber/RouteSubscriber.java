@@ -12,8 +12,6 @@ import com.swiftlogistics.orchestrator.service.RouteService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
-import org.springframework.retry.annotation.Backoff;
-import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
 
 /**
@@ -31,11 +29,6 @@ public class RouteSubscriber {
     private final SsePublisher ssePublisher;
 
     @RabbitListener(queues = RabbitMQConfig.QUEUE_ROUTE_UPDATES)
-    @Retryable(
-        value = {Exception.class},
-        maxAttempts = 3,
-        backoff = @Backoff(delay = 2000)
-    )
     public void processRouteUpdate(RouteUpdateMessage routeUpdate) throws Exception {
         try {
             log.info("Received route update: orderId={}, status={}",
@@ -48,6 +41,11 @@ public class RouteSubscriber {
             } else if ("FAILED".equalsIgnoreCase(routeUpdate.getStatus())) {
                 ssePublisher.publishOrderStatusUpdate(routeUpdate.getOrderId(), OrderStatus.ROUTE_FAILED,
                         "Route planning failed");
+                orderService.beginWarehouseCompensation(routeUpdate.getOrderId(),
+                        "Route planning failed");
+                ssePublisher.publishOrderStatusUpdate(routeUpdate.getOrderId(),
+                        OrderStatus.COMPENSATING_WAREHOUSE,
+                        "Route failed; warehouse compensation started");
             } else if ("ROUTING".equalsIgnoreCase(routeUpdate.getStatus())) {
                 ssePublisher.publishOrderStatusUpdate(routeUpdate.getOrderId(), OrderStatus.ROUTING,
                         "Route planning is in progress");
