@@ -3,6 +3,8 @@ package com.swiftlogistics.cms_adapter.config;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.oxm.jaxb.Jaxb2Marshaller;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
+import io.github.resilience4j.timelimiter.TimeLimiterRegistry;
 
 import com.swiftlogistics.cms_adapter.soap.CmsSoapClient;
 
@@ -17,8 +19,11 @@ public class SoapClientConfig {
     }
 
     @Bean
-    public CmsSoapClient cmsSoapClient(Jaxb2Marshaller marshaller) {
-        CmsSoapClient client = new CmsSoapClient();
+    public CmsSoapClient cmsSoapClient(
+            Jaxb2Marshaller marshaller,
+            CircuitBreakerRegistry circuitBreakerRegistry,
+            TimeLimiterRegistry timeLimiterRegistry) {
+        CmsSoapClient client = new CmsSoapClient(circuitBreakerRegistry, timeLimiterRegistry);
         client.setDefaultUri("http://cms-mock-service:5001/ws");
         client.setMarshaller(marshaller);
         client.setUnmarshaller(marshaller);
