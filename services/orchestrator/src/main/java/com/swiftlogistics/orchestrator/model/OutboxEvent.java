@@ -25,6 +25,8 @@ public class OutboxEvent {
     private String exchange;           // e.g., "order-exchange"
     private String routingKey;         // e.g., "order-created", "warehouse-queue"
     private String payloadJson;        // Serialized JSON of OrderMessage, etc.
+    private String correlationId;
+    private String traceparent;
 
     @Indexed
     private OutboxStatus status;       // PENDING, PUBLISHED, FAILED

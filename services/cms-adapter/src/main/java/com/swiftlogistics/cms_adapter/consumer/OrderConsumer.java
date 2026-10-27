@@ -24,6 +24,8 @@ import org.springframework.ws.client.WebServiceIOException;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.AMQP;
 import org.springframework.amqp.core.Message;
+import org.springframework.messaging.handler.annotation.Header;
+import com.swiftlogistics.cms_adapter.config.CorrelationIdContext;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import com.swiftlogistics.cms_adapter.config.CmsCircuitBreakerConfig;
 
@@ -44,7 +46,10 @@ public class OrderConsumer {
             maxAttempts = 4,
             backoff = @Backoff(delay = 1000, multiplier = 2.0, maxDelay = 10000)
     )
-    public void consumeOrder(OrderMessage orderMessage, Channel channel, Message message) {
+    public void consumeOrder(OrderMessage orderMessage, Channel channel, Message message,
+                             @Header(name = "X-Correlation-Id", required = false) String correlationId,
+                             @Header(name = "traceparent", required = false) String traceparent) {
+        CorrelationIdContext.setFromHeaders(correlationId, traceparent);
         log.info(" Received Order from Orchestrator: {}", orderMessage);
         try {
             SubmitOrderResponse response = cmsSoapClient.submitOrder(
@@ -70,6 +75,8 @@ public class OrderConsumer {
             }
         } catch (java.io.IOException exception) {
             throw new IllegalStateException("Unable to acknowledge CMS order message", exception);
+        } finally {
+            CorrelationIdContext.clear();
         }
     }
 
@@ -79,7 +86,10 @@ public class OrderConsumer {
             maxAttempts = 4,
             backoff = @Backoff(delay = 1000, multiplier = 2.0, maxDelay = 10000)
     )
-    public void compensateBilling(CompensateBillingMessage message) {
+    public void compensateBilling(CompensateBillingMessage message,
+                                  @Header(name = "X-Correlation-Id", required = false) String correlationId,
+                                  @Header(name = "traceparent", required = false) String traceparent) {
+        CorrelationIdContext.setFromHeaders(correlationId, traceparent);
         CancelOrderBillingResponse response = cmsSoapClient.cancelOrderBilling(message.getOrderId());
         BillingUpdateMessage update = BillingUpdateMessage.builder()
                 .orderId(response.getOrderId())
@@ -88,6 +98,7 @@ public class OrderConsumer {
                 .timestamp(LocalDateTime.now())
                 .build();
         billingUpdatePublisher.publishAck(update);
+        CorrelationIdContext.clear();
     }
 
     @RabbitListener(queues = RabbitMQConfig.QUEUE_BILLING_COMPENSATION)
@@ -96,7 +107,10 @@ public class OrderConsumer {
             maxAttempts = 4,
             backoff = @Backoff(delay = 1000, multiplier = 2.0, maxDelay = 10000)
     )
-    public void compensateBillingWithDedicatedQueue(CompensateBillingMessage message) {
+    public void compensateBillingWithDedicatedQueue(CompensateBillingMessage message,
+                                                    @Header(name = "X-Correlation-Id", required = false) String correlationId,
+                                                    @Header(name = "traceparent", required = false) String traceparent) {
+        CorrelationIdContext.setFromHeaders(correlationId, traceparent);
         CancelOrderBillingResponse response = cmsSoapClient.cancelOrderBilling(message.getOrderId());
         billingUpdatePublisher.publishAck(BillingUpdateMessage.builder()
                 .messageId(message.getMessageId())
@@ -105,5 +119,6 @@ public class OrderConsumer {
                 .billedAmount(0D)
                 .timestamp(LocalDateTime.now())
                 .build());
+        CorrelationIdContext.clear();
     }
 }

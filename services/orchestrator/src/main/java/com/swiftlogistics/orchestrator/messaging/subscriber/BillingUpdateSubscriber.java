@@ -12,6 +12,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Service;
+import org.springframework.messaging.handler.annotation.Header;
+import com.swiftlogistics.orchestrator.config.CorrelationIdContext;
 
 @Service
 @RequiredArgsConstructor
@@ -27,7 +29,10 @@ public class BillingUpdateSubscriber {
      * When billing is completed, update order status and trigger warehouse processing
      */
     @RabbitListener(queues = RabbitMQConfig.QUEUE_BILLING_UPDATES)
-    public void handleBillingUpdate(BillingUpdateMessage billingUpdate) {
+    public void handleBillingUpdate(BillingUpdateMessage billingUpdate,
+                                    @Header(name = "X-Correlation-Id", required = false) String correlationId,
+                                    @Header(name = "traceparent", required = false) String traceparent) {
+        CorrelationIdContext.setFromHeaders(correlationId, traceparent);
         try {
             log.info("Received billing update: orderId={}, status={}",
                     billingUpdate.getOrderId(), billingUpdate.getStatus());
@@ -43,8 +48,10 @@ public class BillingUpdateSubscriber {
                 ssePublisher.publishOrderStatusUpdate(billingUpdate.getOrderId(), OrderStatus.BILLING_PENDING,
                         "Billing is pending");
             }
+            CorrelationIdContext.clear();
 
         } catch (Exception e) {
+            CorrelationIdContext.clear();
             log.error("Error processing billing update: orderId={}",
                     billingUpdate.getOrderId(), e);
             

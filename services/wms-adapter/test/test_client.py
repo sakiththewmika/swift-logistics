@@ -14,6 +14,9 @@ def install_stub_pika(channel_mock: MagicMock, connection_mock: MagicMock):
     class BasicProperties:
         def __init__(self, delivery_mode=None, **kwargs):
             self.delivery_mode = delivery_mode
+            self.message_id = kwargs.get('message_id')
+            self.correlation_id = kwargs.get('correlation_id')
+            self.headers = kwargs.get('headers', {})
 
     class PlainCredentials:
         def __init__(self, username, password):
@@ -41,6 +44,7 @@ def install_stub_pika(channel_mock: MagicMock, connection_mock: MagicMock):
 def import_client_module():
     # Force-load the client module from file path
     if 'rabbitmq.client' in sys.modules:
+        del sys.modules['rabbitmq.client']
     # Ensure we import fresh with stubbed pika and path to app
     if APP_PATH not in sys.path:
         sys.path.insert(0, APP_PATH)
@@ -49,6 +53,8 @@ def import_client_module():
             del sys.modules[name]
     import importlib
     return importlib.import_module('rabbitmq.client')
+
+
 class RabbitMQClientTests(unittest.TestCase):
     def test_publish_success(self):
         channel = MagicMock()

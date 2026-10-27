@@ -23,6 +23,17 @@ public class RabbitTemplateConfig {
         RabbitTemplate template = new RabbitTemplate(connectionFactory);
         template.setMessageConverter(converter);
         template.setMandatory(true); // ensure return callback triggered if undeliverable
+        template.addBeforePublishPostProcessors(message -> {
+            String correlationId = CorrelationIdContext.getCorrelationId();
+            if (correlationId != null) {
+                message.getMessageProperties().setHeader(CorrelationIdContext.HEADER_NAME, correlationId);
+            }
+            String traceparent = CorrelationIdContext.getTraceparent();
+            if (traceparent != null) {
+                message.getMessageProperties().setHeader(CorrelationIdContext.TRACEPARENT_HEADER, traceparent);
+            }
+            return message;
+        });
         return template;
     }
 
@@ -31,4 +42,3 @@ public class RabbitTemplateConfig {
         return new Jackson2JsonMessageConverter(objectMapper);
     }
 }
-

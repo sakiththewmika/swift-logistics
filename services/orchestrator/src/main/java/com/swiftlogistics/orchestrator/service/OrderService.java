@@ -20,6 +20,7 @@ import com.swiftlogistics.orchestrator.repository.OrderRepository;
 import com.swiftlogistics.orchestrator.messaging.publisher.OrderPublisher;
 import com.swiftlogistics.orchestrator.repository.OutboxRepository;
 import com.swiftlogistics.orchestrator.repository.ProcessedMessageRepository;
+import com.swiftlogistics.orchestrator.config.CorrelationIdContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -95,6 +96,8 @@ public class OrderService {
                     .exchange(com.swiftlogistics.orchestrator.config.RabbitMQConfig.EXCHANGE_ORDER_CREATED)
                     .routingKey(com.swiftlogistics.orchestrator.config.RabbitMQConfig.ROUTING_KEY_ORDER_CREATED)
                     .payloadJson(objectMapper.writeValueAsString(orderMessage))
+                    .correlationId(CorrelationIdContext.getOrCreateCorrelationId())
+                    .traceparent(CorrelationIdContext.getTraceparent())
                     .status(OutboxStatus.PENDING)
                     .createdAt(Instant.now())
                     .build();
@@ -392,6 +395,8 @@ public class OrderService {
                     .exchange(exchange)
                     .routingKey(routingKey)
                     .payloadJson(objectMapper.writeValueAsString(payload))
+                    .correlationId(CorrelationIdContext.getOrCreateCorrelationId())
+                    .traceparent(CorrelationIdContext.getTraceparent())
                     .status(OutboxStatus.PENDING)
                     .createdAt(Instant.now())
                     .retryCount(0)

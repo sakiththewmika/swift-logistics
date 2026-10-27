@@ -15,6 +15,15 @@ services:
       timeout: 5s
       retries: 5
 
+  zipkin:
+    image: openzipkin/zipkin:latest
+    container_name: zipkin-tracing
+    restart: unless-stopped
+    ports:
+      - "9411:9411"
+    networks:
+      - swift-network
+
   # Local MongoDB replica set for transactional application data
   mongo:
     image: mongo:7

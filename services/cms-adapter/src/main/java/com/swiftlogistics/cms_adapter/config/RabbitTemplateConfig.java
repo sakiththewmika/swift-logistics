@@ -23,6 +23,17 @@ public class RabbitTemplateConfig {
         RabbitTemplate template = new RabbitTemplate(connectionFactory);
         template.setMessageConverter(converter);
         template.setMandatory(true); // ensure return callback triggered if undeliverable
+        template.addBeforePublishPostProcessors(message -> {
+            if (CorrelationIdContext.getCorrelationId() != null) {
+                message.getMessageProperties().setHeader(CorrelationIdContext.HEADER_NAME,
+                        CorrelationIdContext.getCorrelationId());
+            }
+            if (CorrelationIdContext.getTraceparent() != null) {
+                message.getMessageProperties().setHeader(CorrelationIdContext.TRACEPARENT_HEADER,
+                        CorrelationIdContext.getTraceparent());
+            }
+            return message;
+        });
         return template;
     }
 

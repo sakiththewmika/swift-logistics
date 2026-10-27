@@ -14,6 +14,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.messaging.handler.annotation.Header;
+import com.swiftlogistics.orchestrator.config.CorrelationIdContext;
 
 /**
  * Route Subscriber - Step 4 of Optimized Event-Driven Flow
@@ -31,7 +33,10 @@ public class RouteSubscriber {
     private final SimpMessagingTemplate messagingTemplate;
 
     @RabbitListener(queues = RabbitMQConfig.QUEUE_ROUTE_UPDATES)
-    public void processRouteUpdate(RouteUpdateMessage routeUpdate) throws Exception {
+    public void processRouteUpdate(RouteUpdateMessage routeUpdate,
+                                   @Header(name = "X-Correlation-Id", required = false) String correlationId,
+                                   @Header(name = "traceparent", required = false) String traceparent) throws Exception {
+        CorrelationIdContext.setFromHeaders(correlationId, traceparent);
         try {
             log.info("Received route update: orderId={}, status={}",
                     routeUpdate.getOrderId(), routeUpdate.getStatus());
@@ -59,8 +64,10 @@ public class RouteSubscriber {
             }
 
             log.info("Route update processed successfully for order: {}", routeUpdate.getOrderId());
+            CorrelationIdContext.clear();
 
         } catch (Exception e) {
+            CorrelationIdContext.clear();
             log.error("Error processing route update for order: {}", routeUpdate.getOrderId(), e);
             
             eventService.logFailedEvent(

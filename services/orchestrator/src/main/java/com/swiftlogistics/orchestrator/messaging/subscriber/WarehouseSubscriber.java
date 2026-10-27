@@ -12,6 +12,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Service;
+import org.springframework.messaging.handler.annotation.Header;
+import com.swiftlogistics.orchestrator.config.CorrelationIdContext;
 
 /**
  * Step 3: Warehouse Update Subscriber
@@ -27,7 +29,10 @@ public class WarehouseSubscriber {
     private final SsePublisher ssePublisher;
 
     @RabbitListener(queues = RabbitMQConfig.QUEUE_WAREHOUSE_UPDATES)
-    public void handleWarehouseUpdate(WarehouseUpdateMessage warehouseUpdate) {
+    public void handleWarehouseUpdate(WarehouseUpdateMessage warehouseUpdate,
+                                      @Header(name = "X-Correlation-Id", required = false) String correlationId,
+                                      @Header(name = "traceparent", required = false) String traceparent) {
+        CorrelationIdContext.setFromHeaders(correlationId, traceparent);
         try {
             log.info("Received warehouse update: orderId={}, status={}",
                     warehouseUpdate.getOrderId(), warehouseUpdate.getStatus());
@@ -50,8 +55,10 @@ public class WarehouseSubscriber {
                 ssePublisher.publishOrderStatusUpdate(warehouseUpdate.getOrderId(), OrderStatus.PROCESSING,
                         "Warehouse processing in progress");
             }
+            CorrelationIdContext.clear();
 
         } catch (Exception e) {
+            CorrelationIdContext.clear();
             log.error("Error processing warehouse update: orderId={}",
                     warehouseUpdate.getOrderId(), e);
             

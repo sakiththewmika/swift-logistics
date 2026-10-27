@@ -1,3 +1,4 @@
+import inspect
 import threading
 import pika, json, os
 
@@ -39,7 +40,7 @@ class RabbitMQClient:
         channel = connection.channel()
         return connection, channel
 
-    def publish(self, queue, message):
+    def publish(self, queue, message, correlation_id=None):
         """Publish using a fresh connection to avoid thread issues."""
         connection, channel = self._new_publish_channel()
         try:
@@ -54,7 +55,12 @@ class RabbitMQClient:
                         exchange="",
                         routing_key=queue,
                         body=json.dumps(message),
-                        properties=pika.BasicProperties(delivery_mode=2)
+                        properties=pika.BasicProperties(
+                            delivery_mode=2,
+                            message_id=message.get("messageId"),
+                            correlation_id=correlation_id,
+                            headers={"X-Correlation-Id": correlation_id} if correlation_id else {},
+                        )
                     )
                     break
                 except (pika.exceptions.AMQPConnectionError, OSError):
@@ -63,6 +69,7 @@ class RabbitMQClient:
                     import time
                     time.sleep(2 ** attempt)
             print(f"[RABBITMQ] Published to {queue}: {message}")
+            return True
         finally:
             channel.close()
             connection.close()
@@ -86,7 +93,11 @@ class RabbitMQClient:
                     ch.basic_ack(delivery_tag=method.delivery_tag)
                     return
             try:
-                callback(message)
+                parameters = inspect.signature(callback).parameters
+                if len(parameters) >= 2:
+                    callback(message, properties)
+                else:
+                    callback(message)
                 with self.lock:
                     self.processed_message_ids.add(message_id)
                     self.retry_counts.pop(message_id, None)

@@ -109,7 +109,7 @@ async def start_consumer():
                         break
                     continue
                 try:
-                    await process_message(channel, method_frame, body)
+                    await process_message(channel, method_frame, properties, body)
                 except CircuitOpenError:
                     channel.basic_nack(
                         delivery_tag=method_frame.delivery_tag, requeue=True)
@@ -125,11 +125,12 @@ async def start_consumer():
             await asyncio.sleep(5)
 
 
-async def process_message(channel, method_frame, body):
+async def process_message(channel, method_frame, properties, body):
     """Main logic for processing a single order message."""
     order_data = json.loads(body)
     order_id = order_data.get("orderId")
     message_id = order_data.get("messageId") or order_id
+    correlation_id = get_correlation_id(properties)
     with processed_message_lock:
         if message_id in processed_message_ids:
             channel.basic_ack(delivery_tag=method_frame.delivery_tag)
@@ -176,13 +177,30 @@ async def process_message(channel, method_frame, body):
         "vehicleId": vehicle_id,
        "timestamp": datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
     })
-    channel.basic_publish(exchange='', routing_key=OUTGOING_QUEUE, body=result_payload)
+    channel.basic_publish(
+        exchange='',
+        routing_key=OUTGOING_QUEUE,
+        body=result_payload,
+        properties=pika.BasicProperties(
+            delivery_mode=2,
+            message_id=message_id,
+            correlation_id=correlation_id,
+            headers={"X-Correlation-Id": correlation_id} if correlation_id else {},
+        ),
+    )
     print(f"Published routing result for Order ID: {order_id}")
 
     # 4. Acknowledge the message was processed successfully.
     channel.basic_ack(delivery_tag=method_frame.delivery_tag)
     with processed_message_lock:
         processed_message_ids.add(message_id)
+
+
+def get_correlation_id(properties):
+    if properties is None:
+        return None
+    headers = properties.headers or {}
+    return headers.get("X-Correlation-Id") or headers.get("x-correlation-id") or properties.correlation_id
 
 
 async def call_ros_with_retry(payload):
