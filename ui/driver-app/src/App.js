@@ -5,9 +5,11 @@ import NextDeliveryCard from './components/NextDeliveryCard';
 import DeliveriesList from './components/DeliveriesList';
 import CurrentLocationCard from './components/CurrentLocationCard';
 import StatusUpdateModal from './components/StatusUpdateModal';
+import ProofOfDeliveryModal from './components/ProofOfDeliveryModal';
 import { Truck, AlertTriangle } from 'lucide-react';
 import './AppStyles.css';
-import { getAssignedOrders, startDelivery, completeDelivery } from './network/driver';
+import { getAssignedOrders, startDelivery, completeDelivery, submitProofOfDelivery } from './network/driver';
+import { useDriverWebSocket } from './network/useDriverWebSocket';
 
 const MainDriverApp = () => {
   const { driver, logout } = useAuth();
@@ -15,7 +17,18 @@ const MainDriverApp = () => {
   const [deliveries, setDeliveries] = useState([]);
   const [selectedDelivery, setSelectedDelivery] = useState(null);
   const [showStatusUpdate, setShowStatusUpdate] = useState(false);
+  const [showProofOfDelivery, setShowProofOfDelivery] = useState(false);
+  const [proofDelivery, setProofDelivery] = useState(null);
 
+  const handleDispatch = React.useCallback((dispatch) => {
+    setDeliveries(prev => {
+      const existing = prev.find(item => (item.id ?? item.orderId) === dispatch.orderId);
+      return existing
+        ? prev.map(item => (item.id ?? item.orderId) === dispatch.orderId
+          ? { ...item, ...dispatch } : item)
+        : [...prev, dispatch];
+    });
+  }, []);
   useEffect(() => {
     if (driver?.driverId) {
       getAssignedOrders(driver.driverId)
@@ -26,6 +39,9 @@ const MainDriverApp = () => {
 
   const nextDelivery = deliveries.find(d =>
     d.status === 'ASSIGNED' || d.status === 'ROUTED' || d.status === 'IN_TRANSIT'
+  );
+  const websocketConnected = useDriverWebSocket(
+    driver?.driverId, nextDelivery?.id ?? nextDelivery?.orderId, handleDispatch
   );
   const completedCount = deliveries.filter(d => d.status === 'COMPLETED' || d.status === 'DELIVERED').length;
   const pendingCount = deliveries.filter(d =>
@@ -71,6 +87,20 @@ const MainDriverApp = () => {
     }
   };
 
+  const openProofOfDelivery = delivery => {
+    setProofDelivery(delivery);
+    setShowProofOfDelivery(true);
+  };
+
+  const submitProof = async proof => {
+    await submitProofOfDelivery(driver.driverId, proofDelivery.id ?? proofDelivery.orderId, proof);
+    setDeliveries(prev => prev.map(item =>
+      (item.id ?? item.orderId) === (proofDelivery.id ?? proofDelivery.orderId)
+        ? { ...item, status: proof.status } : item));
+    setShowProofOfDelivery(false);
+    setProofDelivery(null);
+  };
+
   // Use driver details from auth context if available
   const driverDetails = driver || { name: 'Kasun Perera', id: 'DRV-001', phone: '+94 77 123 4567' };
 
@@ -85,6 +115,9 @@ const MainDriverApp = () => {
             <div>
               <h1 style={{ fontSize: '18px', fontWeight: '600', margin: 0 }}>Driver Dashboard</h1>
               <p style={{ color: '#bfdbfe', fontSize: '14px', margin: 0 }}>{driverDetails.driverName}</p>
+              <p style={{ color: '#bfdbfe', fontSize: '12px', margin: 0 }}>
+                {websocketConnected ? 'Live telemetry connected' : 'Connecting telemetry...'}
+              </p>
             </div>
           </div>
           <div className="buttons">
@@ -113,12 +146,14 @@ const MainDriverApp = () => {
           delivery={nextDelivery}
           onStart={() => updateDeliveryStatus(nextDelivery?.id ?? nextDelivery?.orderId, 'IN_TRANSIT')}
           onComplete={() => updateDeliveryStatus(nextDelivery?.id ?? nextDelivery?.orderId, 'COMPLETED')}
+          onProof={() => openProofOfDelivery(nextDelivery)}
         />
         <DeliveriesList
           deliveries={deliveries}
           onStart={id => updateDeliveryStatus(id, 'IN_TRANSIT')}
           onComplete={id => updateDeliveryStatus(id, 'COMPLETED')}
           onRefresh={handleRefresh}
+          onProof={openProofOfDelivery}
         />
         <CurrentLocationCard
           currentLocation={currentLocation}
@@ -131,6 +166,11 @@ const MainDriverApp = () => {
         onComplete={() => updateDeliveryStatus(selectedDelivery?.id ?? selectedDelivery?.orderId, 'COMPLETED')}
         onFail={() => updateDeliveryStatus(selectedDelivery?.id ?? selectedDelivery?.orderId, 'FAILED')}
         onCancel={() => setShowStatusUpdate(false)}
+      />
+      <ProofOfDeliveryModal
+        delivery={showProofOfDelivery ? proofDelivery : null}
+        onSubmit={submitProof}
+        onCancel={() => setShowProofOfDelivery(false)}
       />
     </div>
   );

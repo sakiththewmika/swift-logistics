@@ -1,6 +1,7 @@
 package com.swiftlogistics.orchestrator.controller;
 
 import com.swiftlogistics.orchestrator.dto.DriverUpdateMessage;
+import com.swiftlogistics.orchestrator.dto.ProofOfDeliveryRequest;
 import com.swiftlogistics.orchestrator.model.Order;
 import com.swiftlogistics.orchestrator.service.DriverService;
 import lombok.RequiredArgsConstructor;
@@ -52,6 +53,23 @@ public class DriverController {
             return ResponseEntity.ok().build();
         } catch (Exception e) {
             log.error("Failed to complete delivery for order: {}", orderId, e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    @PostMapping("/driver/{driverId}/orders/{orderId}/pod")
+    public ResponseEntity<Void> submitProofOfDelivery(
+            @PathVariable String driverId,
+            @PathVariable String orderId,
+            @RequestBody ProofOfDeliveryRequest request) {
+        try {
+            driverService.recordProofOfDelivery(driverId, orderId, request);
+            return ResponseEntity.ok().build();
+        } catch (IllegalArgumentException e) {
+            log.warn("Invalid POD submission for order {}: {}", orderId, e.getMessage());
+            return ResponseEntity.badRequest().build();
+        } catch (Exception e) {
+            log.error("Failed to submit POD for order {}", orderId, e);
             return ResponseEntity.internalServerError().build();
         }
     }

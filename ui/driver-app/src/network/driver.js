@@ -42,3 +42,10 @@ export const completeDelivery = (orderId) => {
     }
     return apiClient.put(`/drivers/driver/complete/${orderId}`);
 };
+
+export const submitProofOfDelivery = (driverId, orderId, proof) => {
+    if (!driverId || !orderId) {
+        return Promise.reject(new Error('Driver ID and order ID are required.'));
+    }
+    return apiClient.post(`/drivers/driver/${driverId}/orders/${orderId}/pod`, proof);
+};

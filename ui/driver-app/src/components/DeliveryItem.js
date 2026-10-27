@@ -2,7 +2,7 @@ import React from 'react';
 import { MapPin, Package } from 'lucide-react';
 import '../AppStyles.css';
 
-const DeliveryItem = ({ delivery, onStart, onComplete }) => {
+const DeliveryItem = ({ delivery, onStart, onComplete, onProof }) => {
   const deliveryId = delivery.id ?? delivery.orderId;
   const status = delivery.status ?? 'UNKNOWN';
   const items = Array.isArray(delivery.items) ? delivery.items : [];
@@ -64,6 +64,11 @@ const DeliveryItem = ({ delivery, onStart, onComplete }) => {
           {status === 'IN_TRANSIT' && (
             <button onClick={() => onComplete(deliveryId)} className="small-success-button">
               Complete
+            </button>
+          )}
+          {status === 'IN_TRANSIT' && (
+            <button onClick={() => onProof(delivery)} className="gray-button">
+              Proof
             </button>
           )}
         </div>

@@ -3,7 +3,7 @@ import DeliveryItem from './DeliveryItem';
 import { RefreshCw } from 'lucide-react';
 import '../AppStyles.css';
 
-const DeliveriesList = ({ deliveries, onStart, onComplete, onRefresh }) => (
+const DeliveriesList = ({ deliveries, onStart, onComplete, onRefresh, onProof }) => (
   <div className="card">
     <div className="card-header-section">
       <div className="card-header">
@@ -20,6 +20,7 @@ const DeliveriesList = ({ deliveries, onStart, onComplete, onRefresh }) => (
           delivery={delivery}
           onStart={onStart}
           onComplete={onComplete}
+          onProof={onProof}
         />
       ))}
     </div>
@@ -27,4 +28,3 @@ const DeliveriesList = ({ deliveries, onStart, onComplete, onRefresh }) => (
 );
 
 export default DeliveriesList;
-

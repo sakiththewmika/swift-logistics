@@ -12,6 +12,7 @@ import com.swiftlogistics.orchestrator.service.RouteService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
 /**
@@ -27,6 +28,7 @@ public class RouteSubscriber {
     private final RouteService routeService;
     private final EventService eventService;
     private final SsePublisher ssePublisher;
+    private final SimpMessagingTemplate messagingTemplate;
 
     @RabbitListener(queues = RabbitMQConfig.QUEUE_ROUTE_UPDATES)
     public void processRouteUpdate(RouteUpdateMessage routeUpdate) throws Exception {
@@ -38,6 +40,11 @@ public class RouteSubscriber {
             if ("ROUTED".equalsIgnoreCase(routeUpdate.getStatus())) {
                 ssePublisher.publishOrderStatusUpdate(routeUpdate.getOrderId(), OrderStatus.ROUTED,
                         "Route created successfully");
+                if (routeUpdate.getDriverId() != null) {
+                    messagingTemplate.convertAndSend(
+                            "/topic/drivers/" + routeUpdate.getDriverId() + "/dispatch",
+                            routeUpdate);
+                }
             } else if ("FAILED".equalsIgnoreCase(routeUpdate.getStatus())) {
                 ssePublisher.publishOrderStatusUpdate(routeUpdate.getOrderId(), OrderStatus.ROUTE_FAILED,
                         "Route planning failed");

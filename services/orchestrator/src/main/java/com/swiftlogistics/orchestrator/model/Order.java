@@ -56,6 +56,10 @@ public class Order {
     // Billing Information
     private Double totalAmount;
     private String billingStatus;
+    private String proofOfDeliverySignature;
+    private String proofOfDeliveryPhoto;
+    private String deliveryNotes;
+    private String deliveryFailureReason;
 
 
     public String getId() {

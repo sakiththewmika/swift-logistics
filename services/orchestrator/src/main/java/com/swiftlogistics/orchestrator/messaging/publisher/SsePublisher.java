@@ -3,6 +3,7 @@ package com.swiftlogistics.orchestrator.messaging.publisher;
 import com.swiftlogistics.orchestrator.controller.SseController;
 import com.swiftlogistics.orchestrator.dto.DriverUpdateMessage;
 import com.swiftlogistics.orchestrator.dto.OrderStatusMessage;
+import com.swiftlogistics.orchestrator.dto.TelematicsMessage;
 import com.swiftlogistics.orchestrator.model.Order;
 import com.swiftlogistics.orchestrator.model.Route;
 import com.swiftlogistics.orchestrator.model.enums.OrderStatus;
@@ -54,6 +55,23 @@ public class SsePublisher {
             log.error("Failed to publish Order Status Update via SSE: orderId={}, status={}", orderId, status, e);
             // Remove the emitter if there's an error (likely disconnected client)
             sseController.getOrderEmitters().remove(orderId);
+        }
+    }
+
+    public void publishLocationUpdate(TelematicsMessage telemetry) {
+            SseEmitter emitter = sseController.getOrderEmitters().get(telemetry.getOrderId());
+            if (emitter == null) {
+                return;
+            }
+            try {
+                emitter.send(SseEmitter.event()
+                        .name("location-update")
+                        .id(String.valueOf(System.currentTimeMillis()))
+                        .data(telemetry));
+            } catch (IOException | IllegalStateException e) {
+                log.warn("Removing disconnected location SSE client for order {}",
+                        telemetry.getOrderId(), e);
+                sseController.getOrderEmitters().remove(telemetry.getOrderId());
         }
     }
 }

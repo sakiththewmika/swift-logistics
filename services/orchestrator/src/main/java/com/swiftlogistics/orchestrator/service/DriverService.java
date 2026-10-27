@@ -1,6 +1,7 @@
 package com.swiftlogistics.orchestrator.service;
 
 import com.swiftlogistics.orchestrator.dto.DriverUpdateMessage;
+import com.swiftlogistics.orchestrator.dto.ProofOfDeliveryRequest;
 import com.swiftlogistics.orchestrator.messaging.publisher.SsePublisher;
 import com.swiftlogistics.orchestrator.model.Order;
 import com.swiftlogistics.orchestrator.model.Route;
@@ -105,5 +106,35 @@ public class DriverService {
         // Log event
         eventService.logSuccessEvent(orderId, EventType.DELIVERY_COMPLETED, EventSource.DRIVER_APP,
                 "Driver completed delivery for order: " + orderId);
+    }
+
+    public void recordProofOfDelivery(String driverId, String orderId, ProofOfDeliveryRequest request) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new RuntimeException("Order not found with id: " + orderId));
+        if (!driverId.equals(order.getDriverId())) {
+            throw new IllegalArgumentException("Order is not assigned to this driver");
+        }
+        if ("DELIVERED".equalsIgnoreCase(request.getStatus())) {
+            order.setStatus(OrderStatus.DELIVERED);
+            order.setDeliveredAt(LocalDateTime.now());
+            order.setProofOfDeliverySignature(request.getSignatureData());
+            order.setProofOfDeliveryPhoto(request.getPhotoData());
+            eventService.logSuccessEvent(orderId, EventType.DELIVERY_COMPLETED,
+                    EventSource.DRIVER_APP, "Delivery completed with proof of delivery");
+        } else if ("FAILED".equalsIgnoreCase(request.getStatus())) {
+            if (request.getFailureReason() == null || request.getFailureReason().isBlank()) {
+                throw new IllegalArgumentException("A failure reason is required");
+            }
+            order.setStatus(OrderStatus.FAILED);
+            order.setDeliveryFailureReason(request.getFailureReason());
+            eventService.logFailedEvent(orderId, EventType.DELIVERY_FAILED,
+                    EventSource.DRIVER_APP, "Delivery failed: " + request.getFailureReason());
+        } else {
+            throw new IllegalArgumentException("POD status must be DELIVERED or FAILED");
+        }
+        order.setDeliveryNotes(request.getNotes());
+        orderRepository.save(order);
+        ssePublisher.publishOrderStatusUpdate(orderId, order.getStatus(),
+                "Driver submitted proof of delivery");
     }
 }

@@ -2,7 +2,7 @@ import React from 'react';
 import { Navigation, MapPin, Clock, Phone, MessageSquare, Truck, CheckCircle } from 'lucide-react';
 import '../AppStyles.css';
 
-const NextDeliveryCard = ({ delivery, onStart, onComplete }) => {
+const NextDeliveryCard = ({ delivery, onStart, onComplete, onProof }) => {
   if (!delivery) return null;
   const deliveryId = delivery.id ?? delivery.orderId;
   const getPriorityClass = (priority) => {
@@ -68,6 +68,11 @@ const NextDeliveryCard = ({ delivery, onStart, onComplete }) => {
           <button onClick={() => onComplete(deliveryId)} className="success-button">
             <CheckCircle size={16} />
             Mark Complete
+          </button>
+        )}
+        {delivery.status === 'IN_TRANSIT' && (
+          <button onClick={() => onProof(delivery)} className="primary-button">
+            Capture Proof of Delivery
           </button>
         )}
       </div>
