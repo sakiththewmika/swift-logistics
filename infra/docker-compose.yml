@@ -1,4 +1,27 @@
 services:
+  # Local MongoDB replica set for transactional application data
+  mongo:
+    image: mongo:7
+    container_name: swift-mongo
+    restart: unless-stopped
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - swift-network
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mongosh --quiet --host localhost:27017 --eval \"try { rs.status().ok } catch (e) { rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'mongo:27017'}]}).ok }\" | grep -q 1"
+        ]
+      interval: 5s
+      timeout: 10s
+      retries: 12
+      start_period: 5s
+
   # RabbitMQ Message Broker
   rabbitmq:
     image: rabbitmq:3.12-management
@@ -32,9 +55,12 @@ services:
     env_file:
       - ../services/orchestrator/.env
     environment:
+      MONGODB_URI: mongodb://mongo:27017/swift-logic?replicaSet=rs0
       RABBITMQ_HOST: rabbitmq
       SPRING_PROFILES_ACTIVE: docker
     depends_on:
+      mongo:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
     networks:
@@ -75,8 +101,11 @@ services:
       - ../services/ros-integration/.env
     environment:
       ADAPTER_PORT: 8004
+      MONGO_URI: mongodb://mongo:27017/swift-logic?replicaSet=rs0
       RABBITMQ_HOST: rabbitmq
     depends_on:
+      mongo:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
     networks:
@@ -148,6 +177,8 @@ services:
 
 # Named volumes for data persistence
 volumes:
+  mongo_data:
+    driver: local
   rabbitmq_data:
     driver: local
   orchestrator_logs:
