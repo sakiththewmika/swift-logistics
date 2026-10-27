@@ -24,9 +24,13 @@ const MainDriverApp = () => {
     }
   }, [driver]);
 
-  const nextDelivery = deliveries.find(d => d.status === 'ASSIGNED' || d.status === 'ROUTED');
+  const nextDelivery = deliveries.find(d =>
+    d.status === 'ASSIGNED' || d.status === 'ROUTED' || d.status === 'IN_TRANSIT'
+  );
   const completedCount = deliveries.filter(d => d.status === 'COMPLETED' || d.status === 'DELIVERED').length;
-  const pendingCount = deliveries.filter(d => d.status === 'ASSIGNED' || d.status === 'ROUTED').length;
+  const pendingCount = deliveries.filter(d =>
+    d.status === 'ASSIGNED' || d.status === 'ROUTED' || d.status === 'IN_TRANSIT'
+  ).length;
 
   const updateDeliveryStatus = async (orderId, newStatus) => {
     if (!orderId) return;

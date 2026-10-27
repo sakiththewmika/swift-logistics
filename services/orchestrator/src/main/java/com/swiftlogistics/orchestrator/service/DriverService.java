@@ -14,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
@@ -30,7 +31,8 @@ public class DriverService {
      * Get orders by status and dricer
      */
     public List<Order> getPendingOrdersForDriver(String driverId) {
-        return orderRepository.findByStatusAndDriverId(OrderStatus.ROUTED, driverId);
+        return orderRepository.findByStatusInAndDriverId(
+                Arrays.asList(OrderStatus.ROUTED, OrderStatus.IN_TRANSIT), driverId);
     }
 
     /**

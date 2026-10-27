@@ -8,6 +8,7 @@ import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Collection;
 
 @Repository
 public interface OrderRepository extends MongoRepository<Order, String> {
@@ -19,4 +20,6 @@ public interface OrderRepository extends MongoRepository<Order, String> {
     List<Order> findByStatus(OrderStatus status);
 
     List<Order> findByStatusAndDriverId(OrderStatus status, String driverId);
+
+    List<Order> findByStatusInAndDriverId(Collection<OrderStatus> statuses, String driverId);
 }

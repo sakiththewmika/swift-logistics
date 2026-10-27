@@ -58,14 +58,18 @@ const NextDeliveryCard = ({ delivery, onStart, onComplete }) => {
         </div>
       </div>
       <div className="action-buttons">
-        <button onClick={() => onStart(deliveryId)} className="primary-button">
-          <Truck size={16} />
-          Start Delivery
-        </button>
-        <button onClick={() => onComplete(deliveryId)} className="success-button">
-          <CheckCircle size={16} />
-          Mark Complete
-        </button>
+        {delivery.status !== 'IN_TRANSIT' && (
+          <button onClick={() => onStart(deliveryId)} className="primary-button">
+            <Truck size={16} />
+            Start Delivery
+          </button>
+        )}
+        {delivery.status === 'IN_TRANSIT' && (
+          <button onClick={() => onComplete(deliveryId)} className="success-button">
+            <CheckCircle size={16} />
+            Mark Complete
+          </button>
+        )}
       </div>
     </div>
   );

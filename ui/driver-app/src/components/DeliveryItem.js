@@ -54,14 +54,18 @@ const DeliveryItem = ({ delivery, onStart, onComplete }) => {
           </div>
         )}
       </div>
-      {(status === 'ASSIGNED' || status === 'ROUTED') && (
+      {(status === 'ASSIGNED' || status === 'ROUTED' || status === 'IN_TRANSIT') && (
         <div className="delivery-actions">
-          <button onClick={() => onStart(deliveryId)} className="gray-button">
-            Start
-          </button>
-          <button onClick={() => onComplete(deliveryId)} className="small-success-button">
-            Complete
-          </button>
+          {status !== 'IN_TRANSIT' && (
+            <button onClick={() => onStart(deliveryId)} className="gray-button">
+              Start
+            </button>
+          )}
+          {status === 'IN_TRANSIT' && (
+            <button onClick={() => onComplete(deliveryId)} className="small-success-button">
+              Complete
+            </button>
+          )}
         </div>
       )}
     </div>
