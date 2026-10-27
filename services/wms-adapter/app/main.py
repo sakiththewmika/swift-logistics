@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from wms.mssg_parser import parse_string_to_dict, parse_dict_to_string
 from rabbitmq.client import RabbitMQClient
 from wms.client import WMSClient
+from consul import register_service
 
 wms_client = WMSClient()
 rabbitmq_client = RabbitMQClient()
@@ -68,6 +69,15 @@ def start_wms_listener():
 
 @app.on_event("startup")
 def startup_event():
+    try:
+        register_service("wms-adapter", "wms-adapter", 8003)
+        register_service("wms-mock", "wms-mock", 9000, tcp_check=True)
+        wms_client.refresh_endpoint()
+        wms_client.sock.close()
+        wms_client.connect()
+        print("[CONSUL] Registered WMS adapter and WMS service.")
+    except Exception as exc:
+        print(f"[CONSUL] Registration unavailable; continuing with fallback: {exc}")
     start_wms_listener()
 
 

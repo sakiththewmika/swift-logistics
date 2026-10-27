@@ -4,16 +4,19 @@ import httpx
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import asyncio
+from urllib.parse import urlparse
 from datetime import datetime, timezone
 from threading import Lock
 from time import monotonic
+from consul import discover_service
 
 # --- Configuration ---
 # Using environment variables for configuration is a best practice.
 RABBITMQ_URI = os.getenv("RABBITMQ_URI", "amqp://guest:guest@rabbitmq:5672/")
 MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://orchestrator:LRg4OV1lEtpA5WMs@main.wgytsql.mongodb.net/swift-logic")
 # This special URL points from inside a Docker container to your host machine.
-ROS_API_URL = "http://localhost:3001/optimize-route" #On docker wms runs in the same container as wms-adapter, so localhost is fine
+ROS_API_URL = os.getenv("ROS_API_URL", "http://127.0.0.1:3001/optimize-route")
+ROS_SERVICE_NAME = os.getenv("ROS_SERVICE_NAME", "ros-mock")
 
 # --- UPDATED QUEUE NAMES ---
 INCOMING_QUEUE = "route-planning"
@@ -186,8 +189,18 @@ async def call_ros_with_retry(payload):
     last_error = None
     for attempt in range(4):
         try:
+            try:
+                ros_host, ros_port = await discover_service(ROS_SERVICE_NAME)
+            except Exception:
+                parsed_url = urlparse(ROS_API_URL)
+                ros_host = parsed_url.hostname or "127.0.0.1"
+                ros_port = parsed_url.port or 3001
             async with httpx.AsyncClient() as client:
-                response = await client.post(ROS_API_URL, json=payload, timeout=15.0)
+                response = await client.post(
+                    f"http://{ros_host}:{ros_port}/optimize-route",
+                    json=payload,
+                    timeout=15.0,
+                )
                 response.raise_for_status()
                 return response.json()
         except httpx.TransportError as exc:

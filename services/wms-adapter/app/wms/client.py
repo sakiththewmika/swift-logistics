@@ -3,13 +3,28 @@ import json
 import os
 import socket
 import time
+from consul import discover_service
 
 class WMSClient:
     def __init__(self):
-        self.host = os.getenv("WMS_TCP_HOST", "localhost") #On docker wms runs in the same container as wms-adapter, so localhost is fine
+        self.host = os.getenv("WMS_TCP_HOST", "localhost")
         self.port = int(os.getenv("WMS_TCP_PORT", 9000))
         self.sock = None
         self.connect()
+
+    def refresh_endpoint(self):
+        last_error = None
+        for attempt in range(6):
+            try:
+                self.host, self.port = discover_service(
+                    os.getenv("WMS_SERVICE_NAME", "wms-mock")
+                )
+                print(f"[WMS-ADAPTER] Discovered WMS at {self.host}:{self.port}")
+                return
+            except Exception as exc:
+                last_error = exc
+                time.sleep(2)
+        print(f"[WMS-ADAPTER] Consul lookup unavailable; using configured WMS endpoint: {last_error}")
 
     def connect(self):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
