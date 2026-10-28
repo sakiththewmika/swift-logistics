@@ -1,4 +1,5 @@
 import inspect
+import sqlite3
 import threading
 import pika, json, os
 
@@ -9,6 +10,14 @@ class RabbitMQClient:
         self.lock = threading.Lock()
         self.processed_message_ids = set()
         self.retry_counts = {}
+        self.dedup_lock = threading.Lock()
+        dedup_path = os.getenv("DEDUP_DB_PATH", "/tmp/swift-wms-dedup.db")
+        self.dedup_connection = sqlite3.connect(dedup_path, check_same_thread=False)
+        self.dedup_connection.execute(
+            "CREATE TABLE IF NOT EXISTS processed_orders "
+            "(dedup_key TEXT PRIMARY KEY, status TEXT NOT NULL)"
+        )
+        self.dedup_connection.commit()
 
         # Create a connection only for consuming (persistent)
         self.consumer_connections = []
@@ -88,6 +97,19 @@ class RabbitMQClient:
         def on_message(ch, method, properties, body):
             message = json.loads(body.decode())
             message_id = (properties.message_id if properties else None) or message.get("messageId") or message.get("orderId")
+            step = "WMS_COMPENSATION" if queue == "warehouse-compensation" else "WMS_PACKAGING"
+            dedup_key = f"{message.get('orderId')}:{step}"
+            with self.dedup_lock:
+                try:
+                    self.dedup_connection.execute(
+                        "INSERT INTO processed_orders (dedup_key, status) VALUES (?, ?)",
+                        (dedup_key, "PROCESSING"),
+                    )
+                    self.dedup_connection.commit()
+                except sqlite3.IntegrityError:
+                    ch.basic_ack(delivery_tag=method.delivery_tag)
+                    print(f"[RABBITMQ] Duplicate {dedup_key} acknowledged")
+                    return
             with self.lock:
                 if message_id in self.processed_message_ids:
                     ch.basic_ack(delivery_tag=method.delivery_tag)
@@ -101,8 +123,19 @@ class RabbitMQClient:
                 with self.lock:
                     self.processed_message_ids.add(message_id)
                     self.retry_counts.pop(message_id, None)
+                with self.dedup_lock:
+                    self.dedup_connection.execute(
+                        "UPDATE processed_orders SET status = ? WHERE dedup_key = ?",
+                        ("COMPLETED", dedup_key),
+                    )
+                    self.dedup_connection.commit()
                 ch.basic_ack(delivery_tag=method.delivery_tag)
             except (RuntimeError, OSError) as exc:
+                with self.dedup_lock:
+                    self.dedup_connection.execute(
+                        "DELETE FROM processed_orders WHERE dedup_key = ?", (dedup_key,)
+                    )
+                    self.dedup_connection.commit()
                 with self.lock:
                     retries = self.retry_counts.get(message_id, 0) + 1
                     self.retry_counts[message_id] = retries
@@ -110,6 +143,11 @@ class RabbitMQClient:
                 print(f"[RABBITMQ] Transient adapter failure (attempt {retries}/4): {exc}")
                 ch.basic_nack(delivery_tag=method.delivery_tag, requeue=should_retry)
             except Exception as exc:
+                with self.dedup_lock:
+                    self.dedup_connection.execute(
+                        "DELETE FROM processed_orders WHERE dedup_key = ?", (dedup_key,)
+                    )
+                    self.dedup_connection.commit()
                 print(f"[RABBITMQ] Non-retryable message failure: {exc}")
                 ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
@@ -125,3 +163,4 @@ class RabbitMQClient:
         for connection in self.consumer_connections:
             if connection.is_open:
                 connection.close()
+        self.dedup_connection.close()

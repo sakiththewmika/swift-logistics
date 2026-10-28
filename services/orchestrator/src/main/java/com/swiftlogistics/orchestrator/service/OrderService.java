@@ -21,6 +21,7 @@ import com.swiftlogistics.orchestrator.messaging.publisher.OrderPublisher;
 import com.swiftlogistics.orchestrator.repository.OutboxRepository;
 import com.swiftlogistics.orchestrator.repository.ProcessedMessageRepository;
 import com.swiftlogistics.orchestrator.config.CorrelationIdContext;
+import org.springframework.dao.DuplicateKeyException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -267,20 +268,20 @@ public class OrderService {
 
     @Transactional
     public boolean markMessageProcessed(String messageId) {
-        if (messageId == null || messageId.isBlank() || processedMessageRepository.existsById(messageId)) {
+        if (messageId == null || messageId.isBlank()) {
             return false;
         }
         try {
-            processedMessageRepository.save(new ProcessedMessage(messageId, Instant.now()));
+            processedMessageRepository.insert(new ProcessedMessage(messageId, Instant.now()));
             return true;
-        } catch (org.springframework.dao.DuplicateKeyException duplicate) {
+        } catch (DuplicateKeyException duplicate) {
             return false;
         }
     }
 
     @Transactional
     public void processBillingUpdate(com.swiftlogistics.orchestrator.dto.BillingUpdateMessage update) {
-        if (!markMessageProcessed(update.getMessageId() != null ? update.getMessageId() : update.getOrderId())) return;
+        if (!markMessageProcessed(update.getOrderId() + ":BILLING_UPDATE")) return;
         switch (update.getStatus()) {
             case "BILLED" -> {
                 updateOrderStatus(update.getOrderId(), OrderStatus.BILLED, "COMPLETED", update.getBilledAmount());
@@ -312,7 +313,7 @@ public class OrderService {
 
     @Transactional
     public void processWarehouseUpdate(com.swiftlogistics.orchestrator.dto.WarehouseUpdateMessage update) {
-        if (!markMessageProcessed(update.getMessageId() != null ? update.getMessageId() : update.getOrderId())) return;
+        if (!markMessageProcessed(update.getOrderId() + ":WAREHOUSE_UPDATE")) return;
         String status = update.getStatus() == null ? "" : update.getStatus().trim().toUpperCase();
         if ("FAILED".equals(status)) {
             updateOrderStatus(update.getOrderId(), OrderStatus.WAREHOUSE_FAILED);
@@ -369,7 +370,7 @@ public class OrderService {
     @Transactional
     public void processRouteUpdate(com.swiftlogistics.orchestrator.dto.RouteUpdateMessage update,
                                    RouteService routeService) {
-        if (!markMessageProcessed(update.getMessageId() != null ? update.getMessageId() : update.getOrderId())) return;
+        if (!markMessageProcessed(update.getOrderId() + ":ROUTE_UPDATE")) return;
         String status = update.getStatus() == null ? "" : update.getStatus().trim().toUpperCase();
         if ("ROUTED".equals(status)) {
             routeService.createOrderRoute(update.getOrderId(), update.getWaypoints(),

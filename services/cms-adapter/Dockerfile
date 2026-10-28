@@ -5,7 +5,6 @@ WORKDIR /app
 COPY pom.xml mvnw mvnw.cmd ./
 COPY .mvn/ .mvn/
 RUN chmod +x mvnw
-RUN ./mvnw -B -q dependency:go-offline
 
 COPY src/ ./src/
 # Run full build with CXF codegen

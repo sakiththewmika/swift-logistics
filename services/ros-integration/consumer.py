@@ -1,6 +1,7 @@
 import pika
 import json
 import httpx
+import sqlite3
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import asyncio
@@ -37,6 +38,15 @@ db = client['swift-logic']  # Use the correct database name from the URI
 drivers_collection = db.drivers
 processed_message_ids = set()
 processed_message_lock = Lock()
+dedup_connection = sqlite3.connect(
+    os.getenv("DEDUP_DB_PATH", "/tmp/swift-ros-dedup.db"), check_same_thread=False
+)
+dedup_connection.execute(
+    "CREATE TABLE IF NOT EXISTS processed_orders "
+    "(dedup_key TEXT PRIMARY KEY, status TEXT NOT NULL)"
+)
+dedup_connection.commit()
+dedup_lock = Lock()
 
 
 class CircuitOpenError(RuntimeError):
@@ -111,12 +121,14 @@ async def start_consumer():
                 try:
                     await process_message(channel, method_frame, properties, body)
                 except CircuitOpenError:
+                    release_dedup(order_data_from_body(body))
                     channel.basic_nack(
                         delivery_tag=method_frame.delivery_tag, requeue=True)
                     channel.cancel()
                     await asyncio.sleep(min(ros_breaker.remaining_open_seconds(), 5))
                     break
                 except Exception as e:
+                    release_dedup(order_data_from_body(body))
                     print(f"Error processing message: {e}")
                     channel.basic_nack(delivery_tag=method_frame.delivery_tag, requeue=False)
 
@@ -131,6 +143,11 @@ async def process_message(channel, method_frame, properties, body):
     order_id = order_data.get("orderId")
     message_id = order_data.get("messageId") or order_id
     correlation_id = get_correlation_id(properties)
+    dedup_key = f"{order_id}:ROS_ROUTING"
+    if not acquire_dedup(dedup_key):
+        channel.basic_ack(delivery_tag=method_frame.delivery_tag)
+        print(f"Duplicate {dedup_key} acknowledged")
+        return
     with processed_message_lock:
         if message_id in processed_message_ids:
             channel.basic_ack(delivery_tag=method_frame.delivery_tag)
@@ -194,6 +211,46 @@ async def process_message(channel, method_frame, properties, body):
     channel.basic_ack(delivery_tag=method_frame.delivery_tag)
     with processed_message_lock:
         processed_message_ids.add(message_id)
+    complete_dedup(dedup_key)
+
+
+def order_data_from_body(body):
+    try:
+        return json.loads(body).get("orderId")
+    except (TypeError, json.JSONDecodeError):
+        return None
+
+
+def acquire_dedup(dedup_key):
+    with dedup_lock:
+        try:
+            dedup_connection.execute(
+                "INSERT INTO processed_orders (dedup_key, status) VALUES (?, ?)",
+                (dedup_key, "PROCESSING"),
+            )
+            dedup_connection.commit()
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+
+def complete_dedup(dedup_key):
+    with dedup_lock:
+        dedup_connection.execute(
+            "UPDATE processed_orders SET status = ? WHERE dedup_key = ?",
+            ("COMPLETED", dedup_key),
+        )
+        dedup_connection.commit()
+
+
+def release_dedup(order_id):
+    if order_id:
+        with dedup_lock:
+            dedup_connection.execute(
+                "DELETE FROM processed_orders WHERE dedup_key = ?",
+                (f"{order_id}:ROS_ROUTING",),
+            )
+            dedup_connection.commit()
 
 
 def get_correlation_id(properties):

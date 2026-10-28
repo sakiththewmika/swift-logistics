@@ -28,6 +28,7 @@ import org.springframework.messaging.handler.annotation.Header;
 import com.swiftlogistics.cms_adapter.config.CorrelationIdContext;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import com.swiftlogistics.cms_adapter.config.CmsCircuitBreakerConfig;
+import com.swiftlogistics.cms_adapter.service.IdempotentConsumerFilter;
 
 @Service
 @RequiredArgsConstructor
@@ -36,6 +37,7 @@ public class OrderConsumer {
 
     private final CmsSoapClient cmsSoapClient;
     private final BillingUpdatePublisher billingUpdatePublisher;
+    private final IdempotentConsumerFilter idempotentConsumerFilter;
 
     @RabbitListener(
             id = CmsCircuitBreakerConfig.CMS_ORDER_LISTENER_ID,
@@ -50,6 +52,18 @@ public class OrderConsumer {
                              @Header(name = "X-Correlation-Id", required = false) String correlationId,
                              @Header(name = "traceparent", required = false) String traceparent) {
         CorrelationIdContext.setFromHeaders(correlationId, traceparent);
+        String dedupKey = orderMessage.getOrderId() + ":CMS_BILLING";
+        if (!idempotentConsumerFilter.tryAcquireLock(dedupKey)) {
+            log.warn("Duplicate billing request for order {} ignored", orderMessage.getOrderId());
+            try {
+                channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
+            } catch (java.io.IOException exception) {
+                throw new IllegalStateException("Unable to acknowledge duplicate CMS order message", exception);
+            } finally {
+                CorrelationIdContext.clear();
+            }
+            return;
+        }
         log.info(" Received Order from Orchestrator: {}", orderMessage);
         try {
             SubmitOrderResponse response = cmsSoapClient.submitOrder(
@@ -67,6 +81,7 @@ public class OrderConsumer {
             billingUpdatePublisher.publishAck(billingUpdate);
             channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
         } catch (CallNotPermittedException exception) {
+            idempotentConsumerFilter.releaseLockOnFailure(dedupKey);
             log.warn("CMS circuit is OPEN; requeuing order {}", orderMessage.getOrderId());
             try {
                 channel.basicNack(message.getMessageProperties().getDeliveryTag(), false, true);
@@ -74,7 +89,11 @@ public class OrderConsumer {
                 throw new IllegalStateException("Unable to requeue CMS order message", nackException);
             }
         } catch (java.io.IOException exception) {
+            idempotentConsumerFilter.releaseLockOnFailure(dedupKey);
             throw new IllegalStateException("Unable to acknowledge CMS order message", exception);
+        } catch (RuntimeException exception) {
+            idempotentConsumerFilter.releaseLockOnFailure(dedupKey);
+            throw exception;
         } finally {
             CorrelationIdContext.clear();
         }
@@ -90,15 +109,26 @@ public class OrderConsumer {
                                   @Header(name = "X-Correlation-Id", required = false) String correlationId,
                                   @Header(name = "traceparent", required = false) String traceparent) {
         CorrelationIdContext.setFromHeaders(correlationId, traceparent);
-        CancelOrderBillingResponse response = cmsSoapClient.cancelOrderBilling(message.getOrderId());
-        BillingUpdateMessage update = BillingUpdateMessage.builder()
-                .orderId(response.getOrderId())
-                .status(response.getStatus())
-                .billedAmount(0D)
-                .timestamp(LocalDateTime.now())
-                .build();
-        billingUpdatePublisher.publishAck(update);
-        CorrelationIdContext.clear();
+        String dedupKey = message.getOrderId() + ":CMS_REFUND";
+        if (!idempotentConsumerFilter.tryAcquireLock(dedupKey)) {
+            CorrelationIdContext.clear();
+            return;
+        }
+        try {
+            CancelOrderBillingResponse response = cmsSoapClient.cancelOrderBilling(message.getOrderId());
+            BillingUpdateMessage update = BillingUpdateMessage.builder()
+                    .orderId(response.getOrderId())
+                    .status(response.getStatus())
+                    .billedAmount(0D)
+                    .timestamp(LocalDateTime.now())
+                    .build();
+            billingUpdatePublisher.publishAck(update);
+        } catch (RuntimeException exception) {
+            idempotentConsumerFilter.releaseLockOnFailure(dedupKey);
+            throw exception;
+        } finally {
+            CorrelationIdContext.clear();
+        }
     }
 
     @RabbitListener(queues = RabbitMQConfig.QUEUE_BILLING_COMPENSATION)
@@ -111,14 +141,25 @@ public class OrderConsumer {
                                                     @Header(name = "X-Correlation-Id", required = false) String correlationId,
                                                     @Header(name = "traceparent", required = false) String traceparent) {
         CorrelationIdContext.setFromHeaders(correlationId, traceparent);
-        CancelOrderBillingResponse response = cmsSoapClient.cancelOrderBilling(message.getOrderId());
-        billingUpdatePublisher.publishAck(BillingUpdateMessage.builder()
-                .messageId(message.getMessageId())
-                .orderId(response.getOrderId())
-                .status(response.getStatus())
-                .billedAmount(0D)
-                .timestamp(LocalDateTime.now())
-                .build());
-        CorrelationIdContext.clear();
+        String dedupKey = message.getOrderId() + ":CMS_REFUND";
+        if (!idempotentConsumerFilter.tryAcquireLock(dedupKey)) {
+            CorrelationIdContext.clear();
+            return;
+        }
+        try {
+            CancelOrderBillingResponse response = cmsSoapClient.cancelOrderBilling(message.getOrderId());
+            billingUpdatePublisher.publishAck(BillingUpdateMessage.builder()
+                    .messageId(message.getMessageId())
+                    .orderId(response.getOrderId())
+                    .status(response.getStatus())
+                    .billedAmount(0D)
+                    .timestamp(LocalDateTime.now())
+                    .build());
+        } catch (RuntimeException exception) {
+            idempotentConsumerFilter.releaseLockOnFailure(dedupKey);
+            throw exception;
+        } finally {
+            CorrelationIdContext.clear();
+        }
     }
 }
