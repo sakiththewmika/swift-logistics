@@ -12,6 +12,11 @@ const Login = ({ onSwitchToSignUp }) => {
     setError('');
   };
 
+  const handleFillDemo = () => {
+    setForm({ driverName: 'driver1@swift.lk', password: 'password123' });
+    setError('');
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.driverName || !form.password) {
@@ -56,6 +61,16 @@ const Login = ({ onSwitchToSignUp }) => {
           />
         </div>
         {error && <div style={{ color: 'red', marginBottom: 12 }}>{error}</div>}
+        <div style={{ marginBottom: 12 }}>
+          <button
+            type="button"
+            onClick={handleFillDemo}
+            className="gray-button"
+            style={{ width: '100%', padding: '8px 12px', cursor: 'pointer', marginBottom: 4 }}
+          >
+            Fill Demo Driver
+          </button>
+        </div>
         <button type="submit" className="primary-button" style={{ width: '100%' }} disabled={loading}>
           {loading ? 'Logging In...' : 'Log In'}
         </button>
