@@ -40,7 +40,7 @@ class Network {
   delete(endpoint, data, headers) { return this.request('DELETE', endpoint, data, headers); }
 }
 
-const BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000/api/v1';
+const BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8080/api/v1';
 const PORT = undefined;
 
 const apiClient = new Network(BASE_URL, PORT);

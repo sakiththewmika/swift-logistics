@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Client } from '@stomp/stompjs';
 
-const websocketUrl = process.env.REACT_APP_ORCHESTRATOR_WS_URL || 'ws://localhost:8000/ws';
+const websocketUrl = process.env.REACT_APP_WS_URL || 'ws://localhost:8080/ws';
 
 export const useDriverWebSocket = (driverId, orderId, onDispatch, onLocation) => {
   const clientRef = useRef(null);
