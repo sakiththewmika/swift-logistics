@@ -1,5 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { MapPin, Play, Square, RotateCcw, Radio, Activity, Navigation } from 'lucide-react';
+import React from 'react';
+import {
+  Navigation,
+  Play,
+  Pause,
+  RotateCcw,
+  FastForward,
+  Activity,
+  MapPin,
+} from 'lucide-react';
 import LiveDeliveryMap, { WAREHOUSE_COORDS, resolveDestinationCoords } from './LiveDeliveryMap';
 import '../AppStyles.css';
 
@@ -9,85 +17,16 @@ const CurrentLocationCard = ({
   delivery,
   publishLocation,
   websocketConnected = false,
+  driverCoords = { latitude: WAREHOUSE_COORDS[0], longitude: WAREHOUSE_COORDS[1], speed: 0 },
+  simProgress = 0,
+  isSimulating = false,
+  onToggleSim,
+  onFastForward,
+  onResetHub,
 }) => {
-  const [isSimulating, setIsSimulating] = useState(false);
-  const [simProgress, setSimProgress] = useState(0); // 0 to 100%
-  const [driverCoords, setDriverCoords] = useState({
-    latitude: WAREHOUSE_COORDS[0],
-    longitude: WAREHOUSE_COORDS[1],
-    speed: 0,
-  });
-
-  const timerRef = useRef(null);
   const deliveryAddress = delivery?.deliveryAddress || '42 Galle Road, Colombo 03';
   const destinationCoords = resolveDestinationCoords(deliveryAddress, delivery?.destinationCity);
   const activeOrderId = delivery?.id ?? delivery?.orderId;
-
-  // Cleanup simulation timer on unmount
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
-    };
-  }, []);
-
-  const startSimulation = () => {
-    if (isSimulating) {
-      if (timerRef.current) clearInterval(timerRef.current);
-      setIsSimulating(false);
-      return;
-    }
-
-    setIsSimulating(true);
-
-    const startLat = WAREHOUSE_COORDS[0];
-    const startLng = WAREHOUSE_COORDS[1];
-    const destLat = destinationCoords[0];
-    const destLng = destinationCoords[1];
-
-    let currentProgress = simProgress >= 100 ? 0 : simProgress;
-    setSimProgress(currentProgress);
-
-    timerRef.current = setInterval(() => {
-      currentProgress += 5;
-
-      if (currentProgress > 100) {
-        currentProgress = 100;
-        clearInterval(timerRef.current);
-        setIsSimulating(false);
-      }
-
-      const t = currentProgress / 100;
-      const lat = startLat + (destLat - startLat) * t;
-      const lng = startLng + (destLng - startLng) * t;
-      const speed = currentProgress < 100 ? 42 + Math.floor(Math.random() * 8) : 0;
-
-      const newCoords = { latitude: lat, longitude: lng, speed };
-      setDriverCoords(newCoords);
-      setSimProgress(currentProgress);
-
-      // Broadcast telemetry to backend over STOMP WebSocket
-      if (publishLocation) {
-        publishLocation(newCoords, activeOrderId);
-      }
-    }, 2000);
-  };
-
-  const handleResetToWarehouse = () => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    setIsSimulating(false);
-    setSimProgress(0);
-    const resetCoords = {
-      latitude: WAREHOUSE_COORDS[0],
-      longitude: WAREHOUSE_COORDS[1],
-      speed: 0,
-    };
-    setDriverCoords(resetCoords);
-    if (publishLocation) {
-      publishLocation(resetCoords, activeOrderId);
-    }
-  };
 
   return (
     <div className="card" style={{ marginTop: 16 }}>
@@ -107,8 +46,8 @@ const CurrentLocationCard = ({
                 boxShadow: websocketConnected ? '0 0 6px #10b981' : 'none',
               }}
             />
-            <span style={{ color: websocketConnected ? '#15803d' : '#b45309', fontWeight: 500 }}>
-              {websocketConnected ? 'STOMP Telemetry Active' : 'Connecting STOMP...'}
+            <span style={{ color: websocketConnected ? '#15803d' : '#b45309', fontWeight: 600 }}>
+              {websocketConnected ? 'STOMP Telemetry Active (:8080)' : 'Connecting STOMP...'}
             </span>
           </div>
         </div>
@@ -175,10 +114,10 @@ const CurrentLocationCard = ({
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             <button
               type="button"
-              onClick={startSimulation}
+              onClick={onToggleSim}
               style={{
                 flex: 1,
-                minWidth: 180,
+                minWidth: 160,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -195,18 +134,39 @@ const CurrentLocationCard = ({
             >
               {isSimulating ? (
                 <>
-                  <Square size={14} fill="#ffffff" /> Pause Simulation
+                  <Pause size={14} /> Pause Simulation
                 </>
               ) : (
                 <>
-                  <Play size={14} fill="#ffffff" /> Simulate Live Drive Along Route
+                  <Play size={14} /> Resume Route Drive
                 </>
               )}
             </button>
 
             <button
               type="button"
-              onClick={handleResetToWarehouse}
+              onClick={onFastForward}
+              title="Fast forward simulation to arrival"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '9px 12px',
+                backgroundColor: '#eff6ff',
+                border: '1px solid #bfdbfe',
+                borderRadius: 6,
+                fontSize: 12,
+                fontWeight: 600,
+                color: '#1d4ed8',
+                cursor: 'pointer',
+              }}
+            >
+              <FastForward size={13} /> Fast-Forward
+            </button>
+
+            <button
+              type="button"
+              onClick={onResetHub}
               title="Reset coordinates to Peliyagoda Hub"
               style={{
                 display: 'flex',

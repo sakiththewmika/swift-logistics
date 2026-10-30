@@ -2,14 +2,20 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Camera, Image as ImageIcon, RotateCcw, CheckCircle2, AlertTriangle, X } from 'lucide-react';
 import '../AppStyles.css';
 
-const ProofOfDeliveryModal = ({ delivery, onSubmit, onCancel }) => {
+const ProofOfDeliveryModal = ({ delivery, initialMode = 'DELIVERED', onSubmit, onCancel }) => {
   const [signatureData, setSignatureData] = useState('');
   const [photoData, setPhotoData] = useState('');
   const [notes, setNotes] = useState('');
   const [failureReason, setFailureReason] = useState('');
-  const [mode, setMode] = useState('DELIVERED'); // 'DELIVERED' or 'FAILED'
+  const [mode, setMode] = useState(initialMode); // 'DELIVERED' or 'FAILED'
   const [hasSignature, setHasSignature] = useState(false);
   const [isDrawing, setIsDrawing] = useState(false);
+
+  useEffect(() => {
+    if (initialMode) {
+      setMode(initialMode);
+    }
+  }, [initialMode]);
 
   const canvasRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -482,6 +488,36 @@ const ProofOfDeliveryModal = ({ delivery, onSubmit, onCancel }) => {
               <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#b91c1c', marginBottom: 6 }}>
                 Failure Reason <span style={{ color: '#ef4444' }}>*</span>
               </label>
+
+              {/* Preset Failure Chips */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                {[
+                  'Recipient Unavailable',
+                  'Incorrect Address',
+                  'Damaged Parcel',
+                  'Customer Refused Delivery',
+                  'Access Blocked / Security',
+                ].map((chip) => (
+                  <button
+                    key={chip}
+                    type="button"
+                    onClick={() => setFailureReason(chip)}
+                    style={{
+                      padding: '4px 8px',
+                      borderRadius: 12,
+                      fontSize: 11,
+                      fontWeight: failureReason === chip ? 600 : 500,
+                      backgroundColor: failureReason === chip ? '#fee2e2' : '#f8fafc',
+                      color: failureReason === chip ? '#991b1b' : '#64748b',
+                      border: failureReason === chip ? '1px solid #f87171' : '1px solid #e2e8f0',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {chip}
+                  </button>
+                ))}
+              </div>
+
               <select
                 value={failureReason}
                 onChange={(e) => setFailureReason(e.target.value)}
