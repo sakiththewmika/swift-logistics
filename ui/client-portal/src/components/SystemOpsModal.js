@@ -13,6 +13,7 @@ import {
   Layers,
   Database,
   Radio,
+  BookOpen,
 } from 'lucide-react';
 import { orderEndpoints } from '../network/order';
 
@@ -840,6 +841,36 @@ const SystemOpsModal = ({ onClose, onOrderCreated, customerId = 'CUST-001' }) =>
                   </p>
                   <span style={{ fontSize: 11, color: '#2563eb', marginTop: 8, display: 'inline-block' }}>
                     http://localhost:8000/actuator/health →
+                  </span>
+                </a>
+
+                {/* Swagger / OpenAPI 3.0 */}
+                <a
+                  href="http://localhost:8080/swagger-ui.html"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: 'block',
+                    padding: 14,
+                    borderRadius: 8,
+                    border: '1px solid #e2e8f0',
+                    backgroundColor: '#ffffff',
+                    textDecoration: 'none',
+                    color: 'inherit',
+                    transition: 'border-color 0.2s',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, fontSize: 14, color: '#0f172a' }}>
+                      <BookOpen size={18} color="#0284c7" /> Swagger / OpenAPI 3.0
+                    </div>
+                    <ExternalLink size={14} color="#64748b" />
+                  </div>
+                  <p style={{ margin: '6px 0 0 0', fontSize: 12, color: '#64748b' }}>
+                    Interactive OpenAPI 3.0 REST specification, JWT Bearer test console, and endpoint explorer.
+                  </p>
+                  <span style={{ fontSize: 11, color: '#2563eb', marginTop: 8, display: 'inline-block' }}>
+                    http://localhost:8080/swagger-ui.html →
                   </span>
                 </a>
               </div>

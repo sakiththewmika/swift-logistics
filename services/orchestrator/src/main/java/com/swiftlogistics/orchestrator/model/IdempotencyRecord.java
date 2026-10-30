@@ -18,6 +18,6 @@ public class IdempotencyRecord {
     private String idempotencyKey;
     private String orderId;
 
-    @Indexed(expireAfter = "24h")
+    @Indexed(expireAfterSeconds = 86400)
     private Instant createdAt;
 }
