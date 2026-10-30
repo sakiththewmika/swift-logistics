@@ -1,91 +1,204 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import StatusBadge from './StatusBadge';
-import { MapPin, User, Clock, Package, CheckCircle, FileText, AlertCircle, Camera, PenTool } from 'lucide-react';
-import { orderEndpoints } from "../network/order";
+import OrderStepper from './OrderStepper';
+import AuditTimeline from './AuditTimeline';
+import {
+  MapPin,
+  User,
+  Clock,
+  Package,
+  CheckCircle,
+  FileText,
+  AlertCircle,
+  Camera,
+  PenTool,
+  RefreshCw,
+} from 'lucide-react';
+import { orderEndpoints } from '../network/order';
 
 const OrderDetails = ({ order, getStatusColor, getStatusIcon, formatStatus }) => {
-  if (!order) return (
-    <div className="order-details empty">
-      <Package size={48} />
-      <p>Select an order to view details</p>
-    </div>
-  );
+  const [events, setEvents] = useState([]);
+  const [eventsLoading, setEventsLoading] = useState(false);
+  const [currentStatus, setCurrentStatus] = useState(order?.status || 'NEW');
 
-  const handleTrack = async () => {
-    if (order.orderId) {
-      await orderEndpoints.trackOrder(order.orderId);
+  // Sync internal status with prop
+  useEffect(() => {
+    if (order?.status) {
+      setCurrentStatus(order.status);
     }
+  }, [order?.status]);
+
+  // Load audit events and connect to SSE stream
+  useEffect(() => {
+    if (!order?.orderId) {
+      setEvents([]);
+      return;
+    }
+
+    let isMounted = true;
+    setEventsLoading(true);
+
+    const loadEvents = () => {
+      orderEndpoints
+        .getOrderEvents(order.orderId)
+        .then((data) => {
+          if (isMounted) {
+            setEvents(Array.isArray(data) ? data : []);
+          }
+        })
+        .catch((err) => {
+          console.warn('Failed to fetch events for order:', order.orderId, err);
+          if (isMounted) setEvents([]);
+        })
+        .finally(() => {
+          if (isMounted) setEventsLoading(false);
+        });
+    };
+
+    loadEvents();
+
+    // Subscribe to SSE updates
+    const sseSource = orderEndpoints.trackOrder(order.orderId, (update) => {
+      if (!isMounted) return;
+      if (update && typeof update === 'object' && update.status) {
+        setCurrentStatus(update.status);
+      }
+      loadEvents();
+    });
+
+    return () => {
+      isMounted = false;
+      if (sseSource) {
+        sseSource.close();
+      }
+    };
+  }, [order?.orderId]);
+
+  if (!order) {
+    return (
+      <div className="order-details empty">
+        <Package size={48} />
+        <p>Select an order to view details</p>
+      </div>
+    );
+  }
+
+  const handleRefreshEvents = () => {
+    if (!order?.orderId) return;
+    setEventsLoading(true);
+    orderEndpoints
+      .getOrderEvents(order.orderId)
+      .then((data) => setEvents(Array.isArray(data) ? data : []))
+      .catch(() => setEvents([]))
+      .finally(() => setEventsLoading(false));
   };
 
-  const isDelivered = order.status === 'DELIVERED';
+  const isDelivered = currentStatus === 'DELIVERED';
   const hasPodData = Boolean(
     order.proofOfDeliverySignature ||
     order.proofOfDeliveryPhoto ||
     order.deliveryNotes ||
     isDelivered
   );
-  const isFailed = order.status === 'FAILED';
+  const isFailed = currentStatus === 'FAILED';
 
   return (
     <div className="order-details" key={order.orderId}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h2 style={{ margin: 0, fontSize: 20, color: '#1e293b' }}>Order Details</h2>
-        <button className="create-order-btn" onClick={handleTrack} style={{ margin: 0 }}>
-          Track Order
-        </button>
-      </div>
-
-      <div className="order-detail-row">
-        <span className="order-detail-label">Order ID:</span>
-        <span style={{ fontFamily: 'monospace', fontWeight: 600, color: '#0f172a' }}>{order.orderId}</span>
-      </div>
-
-      <div className="order-detail-row">
-        <span className="order-detail-label">Status:</span>
-        <StatusBadge status={order.status} getStatusColor={getStatusColor} getStatusIcon={getStatusIcon} formatStatus={formatStatus} />
-      </div>
-
-      <div className="order-detail-row">
-        <MapPin size={16} /> <span className="order-detail-label">Delivery Address:</span> {order.deliveryAddress || 'N/A'}
-      </div>
-
-      <div className="order-detail-row">
-        <MapPin size={16} /> <span className="order-detail-label">City:</span> {order.city || 'Colombo'}
-      </div>
-
-      <div className="order-detail-row">
-        <User size={16} /> <span className="order-detail-label">Driver:</span> {order.driverName || order.driverId || 'Not assigned'}
-      </div>
-
-      {order.vehicleId && (
-        <div className="order-detail-row">
-          <span className="order-detail-label" style={{ paddingLeft: 24 }}>Vehicle:</span> {order.vehicleId}
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 20, color: '#1e293b' }}>Order Details</h2>
+          <span style={{ fontSize: 13, color: '#64748b' }}>
+            ID: <strong style={{ fontFamily: 'monospace', color: '#0f172a' }}>{order.orderId}</strong>
+          </span>
         </div>
-      )}
-
-      {order.totalAmount && (
-        <div className="order-detail-row">
-          <span className="order-detail-label" style={{ paddingLeft: 24 }}>Total Amount:</span>
-          <strong>LKR {Number(order.totalAmount).toLocaleString()}</strong>
-          <span style={{ fontSize: 11, color: '#16a34a', marginLeft: 6 }}>({order.billingStatus || 'PAID'})</span>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            type="button"
+            className="create-order-btn"
+            onClick={handleRefreshEvents}
+            title="Refresh order events"
+            style={{ margin: 0, padding: '7px 12px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 5 }}
+          >
+            <RefreshCw size={14} className={eventsLoading ? 'spin' : ''} />
+            Refresh Trail
+          </button>
         </div>
-      )}
+      </div>
+
+      {/* Visual Order Lifecycle Stepper with Saga rollback alerts */}
+      <OrderStepper
+        status={currentStatus}
+        failureReason={order.deliveryFailureReason}
+        deliveryNotes={order.deliveryNotes}
+      />
+
+      {/* Summary Metadata Grid */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          gap: 12,
+          padding: 14,
+          backgroundColor: '#f8fafc',
+          borderRadius: 8,
+          border: '1px solid #e2e8f0',
+          marginBottom: 16,
+        }}
+      >
+        <div>
+          <span style={{ fontSize: 11, fontWeight: 600, color: '#64748b', display: 'block' }}>CURRENT STATUS</span>
+          <div style={{ marginTop: 4 }}>
+            <StatusBadge
+              status={currentStatus}
+              getStatusColor={getStatusColor}
+              getStatusIcon={getStatusIcon}
+              formatStatus={formatStatus}
+            />
+          </div>
+        </div>
+
+        <div>
+          <span style={{ fontSize: 11, fontWeight: 600, color: '#64748b', display: 'block' }}>DELIVERY DESTINATION</span>
+          <div style={{ fontSize: 13, fontWeight: 500, color: '#1e293b', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <MapPin size={14} color="#64748b" />
+            <span>{order.deliveryAddress || 'Colombo, Sri Lanka'}</span>
+          </div>
+        </div>
+
+        <div>
+          <span style={{ fontSize: 11, fontWeight: 600, color: '#64748b', display: 'block' }}>ASSIGNED DRIVER</span>
+          <div style={{ fontSize: 13, fontWeight: 500, color: '#1e293b', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <User size={14} color="#64748b" />
+            <span>{order.driverName || order.driverId || 'Pending Assignment'}</span>
+            {order.vehicleId && (
+              <span style={{ fontSize: 11, color: '#64748b' }}>({order.vehicleId})</span>
+            )}
+          </div>
+        </div>
+
+        <div>
+          <span style={{ fontSize: 11, fontWeight: 600, color: '#64748b', display: 'block' }}>TOTAL AMOUNT</span>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#0f172a', marginTop: 4 }}>
+            {order.totalAmount ? `LKR ${Number(order.totalAmount).toLocaleString()}` : 'N/A'}
+            <span style={{ fontSize: 11, color: '#16a34a', marginLeft: 6, fontWeight: 500 }}>
+              ({order.billingStatus || 'PAID'})
+            </span>
+          </div>
+        </div>
+      </div>
 
       {order.estimatedDelivery && (
-        <div className="order-detail-row">
+        <div className="order-detail-row" style={{ marginBottom: 12 }}>
           <Clock size={16} /> <span className="order-detail-label">ETA:</span> {order.estimatedDelivery}
         </div>
       )}
-
-      <div className="order-detail-row">
-        <span className="order-detail-label" style={{ paddingLeft: 24 }}>Created:</span> {order.createdAt ? new Date(order.createdAt).toLocaleString() : 'N/A'}
-      </div>
 
       {/* Proof of Delivery (POD) Section */}
       {hasPodData && !isFailed && (
         <div
           style={{
-            marginTop: 24,
+            marginTop: 20,
             padding: 16,
             backgroundColor: '#f0fdf4',
             border: '1px solid #bbf7d0',
@@ -200,6 +313,9 @@ const OrderDetails = ({ order, getStatusColor, getStatusIcon, formatStatus }) =>
           )}
         </div>
       )}
+
+      {/* Enhanced Event Sourcing Audit Trail Section */}
+      <AuditTimeline events={events} loading={eventsLoading} />
     </div>
   );
 };
