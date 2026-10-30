@@ -1,8 +1,11 @@
 import sys
+import os
 import types
 import json
 import unittest
 from unittest.mock import MagicMock
+
+os.environ.setdefault('DEDUP_DB_PATH', ':memory:')
 
 
 APP_PATH = __file__.split('/services/wms-adapter/')[0] + '/services/wms-adapter/app'
