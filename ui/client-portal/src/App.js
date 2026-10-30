@@ -8,9 +8,10 @@ import UserProfile from './components/UserProfile';
 import CreateOrderModal from './components/CreateOrderModal';
 import SignInModal from './components/SignInModal';
 import SignUpModal from './components/SignUpModal';
+import SystemOpsModal from './components/SystemOpsModal';
 import { useAuth } from './context/AuthContext';
 import { orderEndpoints } from './network/order';
-import { Package, Clock, Truck, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react';
+import { Package, Clock, Truck, CheckCircle, AlertCircle, RefreshCw, Activity } from 'lucide-react';
 
 const getStatusColor = (status) => {
   switch (status) {
@@ -52,6 +53,7 @@ const ClientPortal = () => {
   const [showCreateOrder, setShowCreateOrder] = useState(false);
   const [showSignIn, setShowSignIn] = useState(false);
   const [showSignUp, setShowSignUp] = useState(false);
+  const [showSystemOps, setShowSystemOps] = useState(false);
 
   const fetchOrders = useCallback(async () => {
     try {
@@ -119,6 +121,21 @@ const ClientPortal = () => {
             <button className="create-order-btn" onClick={() => setShowCreateOrder(true)}>
               + Create Order
             </button>
+            <button
+              className="create-order-btn"
+              onClick={() => setShowSystemOps(true)}
+              title="Open Middleware Architecture & Chaos Recovery Console"
+              style={{
+                backgroundColor: '#0f172a',
+                color: '#f8fafc',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                border: '1px solid #334155',
+              }}
+            >
+              <Activity size={15} color="#38bdf8" /> Middleware Ops & Chaos
+            </button>
           </div>
         </div>
       </header>
@@ -161,6 +178,16 @@ const ClientPortal = () => {
       )}
       {showSignUp && (
         <SignUpModal onClose={() => setShowSignUp(false)} />
+      )}
+      {showSystemOps && (
+        <SystemOpsModal
+          onClose={() => setShowSystemOps(false)}
+          onOrderCreated={(newOrder) => {
+            fetchOrders();
+            if (newOrder) setSelectedOrder(newOrder);
+          }}
+          customerId={getCustomerId()}
+        />
       )}
     </div>
   );

@@ -1,8 +1,19 @@
 import NETWORK from './network';
 
 export const orderEndpoints = {
-  async createOrder(data) {
-    return await NETWORK.post('/orders', data);
+  async createOrder(data, customHeaders = {}) {
+    const key =
+      customHeaders['Idempotency-Key'] ||
+      `idem-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    return await NETWORK.post('/orders', data, { 'Idempotency-Key': key, ...customHeaders });
+  },
+
+  async replayDlq(queue, limit = 10) {
+    return await NETWORK.post(`/recovery/replay?queue=${encodeURIComponent(queue)}&limit=${limit}`);
+  },
+
+  async checkHealth() {
+    return await NETWORK.get('/orders/health');
   },
 
   async getOrder(orderId) {
