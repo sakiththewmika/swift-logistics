@@ -11,9 +11,28 @@ class Network {
 
   async request(method, endpoint, data, headers = {}) {
     const url = this.buildUrl(endpoint);
+    const authHeaders = {};
+    try {
+      const stored = localStorage.getItem('driver_details');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        const token = parsed?.token || parsed?.accessToken;
+        if (token) {
+          authHeaders['Authorization'] = `Bearer ${token}`;
+        }
+      }
+      if (!authHeaders['Authorization']) {
+        const directToken = localStorage.getItem('driver_token');
+        if (directToken && directToken.startsWith('ey')) {
+          authHeaders['Authorization'] = `Bearer ${directToken}`;
+        }
+      }
+    } catch {
+      // ignore parse error
+    }
     const options = {
       method: method.toUpperCase(),
-      headers: { 'Content-Type': 'application/json', ...headers },
+      headers: { 'Content-Type': 'application/json', ...authHeaders, ...headers },
     };
     if (data && method.toUpperCase() !== 'GET') {
       options.body = typeof data === 'string' ? data : JSON.stringify(data);

@@ -24,6 +24,12 @@ public class Customer {
     private String password;
     private String phone;
 
+    @org.springframework.data.annotation.Transient
+    private String token;
+
+    @org.springframework.data.annotation.Transient
+    private String accessToken;
+
     @CreatedDate
     private LocalDateTime createdAt;
 

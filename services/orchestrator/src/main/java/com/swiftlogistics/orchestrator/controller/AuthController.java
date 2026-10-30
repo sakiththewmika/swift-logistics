@@ -5,9 +5,11 @@ import com.swiftlogistics.orchestrator.model.Driver;
 import com.swiftlogistics.orchestrator.dto.LoginRequest;
 import com.swiftlogistics.orchestrator.repository.CustomerRepository;
 import com.swiftlogistics.orchestrator.repository.DriverRepository;
+import com.swiftlogistics.orchestrator.security.JwtService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -22,8 +24,22 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
   private final CustomerRepository customerRepository;
   private final DriverRepository driverRepository;
+  private final PasswordEncoder passwordEncoder;
+  private final JwtService jwtService;
 
-  //  Mock Auth functionality
+  /**
+   * Supports verifying both modern BCrypt hashed passwords and legacy plain-text passwords.
+   */
+  private boolean verifyPassword(String rawPassword, String storedPassword) {
+    if (storedPassword == null || rawPassword == null) {
+      return false;
+    }
+    if (storedPassword.startsWith("$2a$") || storedPassword.startsWith("$2b$") || storedPassword.startsWith("$2y$")) {
+      return passwordEncoder.matches(rawPassword, storedPassword);
+    }
+    return storedPassword.equals(rawPassword);
+  }
+
   @PostMapping("/customer")
   public ResponseEntity<?> login(@RequestBody LoginRequest loginRequest) {
     if (loginRequest.getUsername() == null || loginRequest.getUsername().isEmpty()) {
@@ -39,11 +55,25 @@ public class AuthController {
     if (customer == null) {
       return ResponseEntity.status(401).body("Customer not found");
     }
-    if (!customer.getPassword().equals(loginRequest.getPassword())) {
+    if (!verifyPassword(loginRequest.getPassword(), customer.getPassword())) {
       return ResponseEntity.status(401).body("Invalid password");
     }
-    // Remove password before returning customer details
+
+    // Upgrade legacy plain-text password to BCrypt hash transparently
+    if (!customer.getPassword().startsWith("$2")) {
+      customer.setPassword(passwordEncoder.encode(loginRequest.getPassword()));
+      customerRepository.save(customer);
+    }
+
+    String token = jwtService.generateToken(
+        customer.getCustomerId(),
+        customer.getCustomerEmail() != null ? customer.getCustomerEmail() : customer.getCustomerName(),
+        "CUSTOMER"
+    );
+
     customer.setPassword(null);
+    customer.setToken(token);
+    customer.setAccessToken(token);
     return ResponseEntity.ok(customer);
   }
 
@@ -68,15 +98,27 @@ public class AuthController {
     if (driver == null) {
       return ResponseEntity.status(401).body("Driver not found");
     }
-    if (!driver.getPassword().equals(loginRequest.getPassword())) {
+    if (!verifyPassword(loginRequest.getPassword(), driver.getPassword())) {
       return ResponseEntity.status(401).body("Invalid password");
     }
 
-    driver.setAvailable(true);
+    // Upgrade legacy plain-text password to BCrypt hash transparently
+    if (!driver.getPassword().startsWith("$2")) {
+      driver.setPassword(passwordEncoder.encode(loginRequest.getPassword()));
+    }
 
+    driver.setAvailable(true);
     driverRepository.save(driver);
 
+    String token = jwtService.generateToken(
+        driver.getDriverId(),
+        driver.getDriverEmail() != null ? driver.getDriverEmail() : driver.getDriverName(),
+        "DRIVER"
+    );
+
     driver.setPassword(null);
+    driver.setToken(token);
+    driver.setAccessToken(token);
     return ResponseEntity.ok(driver);
   }
 
@@ -112,8 +154,19 @@ public class AuthController {
     if (customerRepository.findCustomerByCustomerName(customer.getCustomerName()) != null) {
       return ResponseEntity.status(400).body("Customer already exists");
     }
+
+    customer.setPassword(passwordEncoder.encode(customer.getPassword()));
     Customer savedCustomer = customerRepository.save(customer);
+
+    String token = jwtService.generateToken(
+        savedCustomer.getCustomerId(),
+        savedCustomer.getCustomerEmail() != null ? savedCustomer.getCustomerEmail() : savedCustomer.getCustomerName(),
+        "CUSTOMER"
+    );
+
     savedCustomer.setPassword(null);
+    savedCustomer.setToken(token);
+    savedCustomer.setAccessToken(token);
     return ResponseEntity.ok(savedCustomer);
   }
 
@@ -128,8 +181,19 @@ public class AuthController {
     if (driverRepository.findDriverByDriverName(driver.getDriverName()) != null) {
       return ResponseEntity.status(400).body("Driver already exists");
     }
-    Driver token = driverRepository.save(driver);
-    token.setPassword(null);
-    return ResponseEntity.ok(token);
+
+    driver.setPassword(passwordEncoder.encode(driver.getPassword()));
+    Driver savedDriver = driverRepository.save(driver);
+
+    String token = jwtService.generateToken(
+        savedDriver.getDriverId(),
+        savedDriver.getDriverEmail() != null ? savedDriver.getDriverEmail() : savedDriver.getDriverName(),
+        "DRIVER"
+    );
+
+    savedDriver.setPassword(null);
+    savedDriver.setToken(token);
+    savedDriver.setAccessToken(token);
+    return ResponseEntity.ok(savedDriver);
   }
 }

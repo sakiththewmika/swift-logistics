@@ -40,6 +40,7 @@ public class DataSeeder implements CommandLineRunner {
     private final OrderRepository orderRepository;
     private final EventRepository eventRepository;
     private final RouteRepository routeRepository;
+    private final org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
 
     @Override
     public void run(String... args) {
@@ -50,12 +51,14 @@ public class DataSeeder implements CommandLineRunner {
 
         log.info("Seeding demo customers, drivers, sample orders, and audit events...");
 
+        String defaultHashedPassword = passwordEncoder.encode("password123");
+
         // 1. Seed Demo Customers
         Customer customer1 = Customer.builder()
                 .customerId("cust-001")
                 .customerName("Apex Electronics Colombo")
                 .customerEmail("client@swift.lk")
-                .password("password123")
+                .password(defaultHashedPassword)
                 .phone("+94112345678")
                 .createdAt(LocalDateTime.now().minusDays(5))
                 .updatedAt(LocalDateTime.now().minusDays(5))
@@ -65,7 +68,7 @@ public class DataSeeder implements CommandLineRunner {
                 .customerId("cust-002")
                 .customerName("Ceylon Retail Hub")
                 .customerEmail("merchant@swift.lk")
-                .password("password123")
+                .password(defaultHashedPassword)
                 .phone("+94119876543")
                 .createdAt(LocalDateTime.now().minusDays(5))
                 .updatedAt(LocalDateTime.now().minusDays(5))
@@ -86,7 +89,7 @@ public class DataSeeder implements CommandLineRunner {
                 .status("AVAILABLE")
                 .isAvailable(true)
                 .type("VAN")
-                .password("password123")
+                .password(defaultHashedPassword)
                 .build();
 
         Driver driver2 = Driver.builder()
@@ -100,7 +103,7 @@ public class DataSeeder implements CommandLineRunner {
                 .status("BUSY")
                 .isAvailable(false)
                 .type("MOTORCYCLE")
-                .password("password123")
+                .password(defaultHashedPassword)
                 .build();
 
         driverRepository.saveAll(List.of(driver1, driver2));

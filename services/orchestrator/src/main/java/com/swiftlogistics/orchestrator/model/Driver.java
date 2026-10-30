@@ -25,4 +25,10 @@ public class Driver {
   private boolean isAvailable;
   private String type;
   private String password;
+
+  @org.springframework.data.annotation.Transient
+  private String token;
+
+  @org.springframework.data.annotation.Transient
+  private String accessToken;
 }
