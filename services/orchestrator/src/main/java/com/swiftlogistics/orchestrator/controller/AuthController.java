@@ -57,6 +57,15 @@ public class AuthController {
     }
     Driver driver = driverRepository.findDriverByDriverName(loginRequest.getUsername());
     if (driver == null) {
+      driver = driverRepository.findDriverByDriverEmail(loginRequest.getUsername());
+    }
+    if (driver == null) {
+      driver = driverRepository.findDriverByName(loginRequest.getUsername());
+    }
+    if (driver == null) {
+      driver = driverRepository.findById(loginRequest.getUsername()).orElse(null);
+    }
+    if (driver == null) {
       return ResponseEntity.status(401).body("Driver not found");
     }
     if (!driver.getPassword().equals(loginRequest.getPassword())) {
@@ -72,21 +81,23 @@ public class AuthController {
   }
 
   @PostMapping("/driver-logout")
-  public ResponseEntity<?> driverLogout(@RequestBody LoginRequest loginRequest) {
-    Driver driver = driverRepository.findDriverByDriverName(loginRequest.getUsername());
-    // Mock driver authentication logic
-    if (driver == null) {
-      return ResponseEntity.status(401).body("Driver not found");
+  public ResponseEntity<?> driverLogout(@RequestBody(required = false) LoginRequest loginRequest) {
+    if (loginRequest != null && loginRequest.getUsername() != null) {
+      Driver driver = driverRepository.findDriverByDriverName(loginRequest.getUsername());
+      if (driver == null) {
+        driver = driverRepository.findDriverByDriverEmail(loginRequest.getUsername());
+      }
+      if (driver == null) {
+        driver = driverRepository.findDriverByName(loginRequest.getUsername());
+      }
+      if (driver == null) {
+        driver = driverRepository.findById(loginRequest.getUsername()).orElse(null);
+      }
+      if (driver != null) {
+        driver.setAvailable(false);
+        driverRepository.save(driver);
+      }
     }
-    if (!driver.getPassword().equals(loginRequest.getPassword())) {
-      return ResponseEntity.status(401).body("Invalid password");
-    }
-
-    driver.setAvailable(false);
-
-    driverRepository.save(driver);
-
-    driver.setPassword(null);
     return ResponseEntity.ok("Logged out successfully");
   }
 

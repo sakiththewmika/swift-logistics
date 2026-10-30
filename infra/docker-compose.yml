@@ -77,6 +77,7 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000" # Application port
+      - "8080:8000" # Compatibility port for STOMP WebSocket & driver-app API
     env_file:
       - ../services/orchestrator/.env
     environment:

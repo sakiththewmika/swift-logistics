@@ -22,6 +22,7 @@ public class Customer {
     private String customerName;
     private String customerEmail;
     private String password;
+    private String phone;
 
     @CreatedDate
     private LocalDateTime createdAt;

@@ -16,7 +16,12 @@ public class Driver {
   @Id
   private String driverId;
   private String driverName;
+  private String driverEmail;
+  private String name;
   private String vehicleId;
+  private String vehicleNumber;
+  private String currentLocation;
+  private String status;
   private boolean isAvailable;
   private String type;
   private String password;
