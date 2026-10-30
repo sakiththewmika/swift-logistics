@@ -106,9 +106,30 @@ const OrderDetails = ({ order, getStatusColor, getStatusIcon, formatStatus }) =>
 
   if (!order) {
     return (
-      <div className="order-details empty">
-        <Package size={48} />
-        <p>Select an order to view details</p>
+      <div
+        style={{
+          backgroundColor: '#ffffff',
+          borderRadius: 10,
+          border: '1px solid #e2e8f0',
+          padding: 48,
+          textAlign: 'center',
+          color: '#94a3b8',
+          height: 'calc(100vh - 220px)',
+          minHeight: 680,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.05)',
+        }}
+      >
+        <Package size={56} style={{ color: '#cbd5e1', marginBottom: 12 }} />
+        <h3 style={{ margin: 0, color: '#475569', fontSize: 18, fontWeight: 600 }}>
+          No Order Selected
+        </h3>
+        <p style={{ margin: '8px 0 0 0', fontSize: 13, color: '#94a3b8', maxWidth: 360 }}>
+          Select an order from the list on the left to track real-time telematics, Saga lifecycle stages, and proof of delivery.
+        </p>
       </div>
     );
   }
@@ -133,7 +154,20 @@ const OrderDetails = ({ order, getStatusColor, getStatusIcon, formatStatus }) =>
   const isFailed = currentStatus === 'FAILED';
 
   return (
-    <div className="order-details" key={order.orderId}>
+    <div
+      className="order-details"
+      key={order.orderId}
+      style={{
+        margin: 0,
+        borderRadius: 10,
+        border: '1px solid #e2e8f0',
+        height: 'calc(100vh - 220px)',
+        minHeight: 680,
+        overflowY: 'auto',
+        padding: 20,
+        boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.05)',
+      }}
+    >
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <div>
