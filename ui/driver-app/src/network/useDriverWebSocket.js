@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { Client } from '@stomp/stompjs';
 
 const websocketUrl = process.env.REACT_APP_WS_URL || 'ws://localhost:8080/ws';
@@ -7,6 +7,24 @@ export const useDriverWebSocket = (driverId, orderId, onDispatch, onLocation) =>
   const clientRef = useRef(null);
   const latestPositionRef = useRef(null);
   const [connected, setConnected] = useState(false);
+
+  const publishLocation = useCallback((coords, activeOrderId) => {
+    const targetOrderId = activeOrderId || orderId;
+    if (clientRef.current && clientRef.current.connected && driverId && coords) {
+      clientRef.current.publish({
+        destination: '/app/telemetry',
+        body: JSON.stringify({
+          driverId,
+          orderId: targetOrderId,
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+          speed: coords.speed ?? 45,
+          heading: coords.heading ?? 0,
+          timestamp: new Date().toISOString(),
+        }),
+      });
+    }
+  }, [driverId, orderId]);
 
   useEffect(() => {
     if (!driverId) return undefined;
@@ -68,5 +86,5 @@ export const useDriverWebSocket = (driverId, orderId, onDispatch, onLocation) =>
     };
   }, [driverId, orderId, onDispatch, onLocation]);
 
-  return connected;
+  return { connected, publishLocation };
 };

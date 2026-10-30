@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import StatusBadge from './StatusBadge';
 import OrderStepper from './OrderStepper';
 import AuditTimeline from './AuditTimeline';
+import LiveDeliveryMap from './LiveDeliveryMap';
 import {
   MapPin,
   User,
@@ -20,6 +21,7 @@ const OrderDetails = ({ order, getStatusColor, getStatusIcon, formatStatus }) =>
   const [events, setEvents] = useState([]);
   const [eventsLoading, setEventsLoading] = useState(false);
   const [currentStatus, setCurrentStatus] = useState(order?.status || 'NEW');
+  const [driverLocation, setDriverLocation] = useState(null);
 
   // Sync internal status with prop
   useEffect(() => {
@@ -32,6 +34,7 @@ const OrderDetails = ({ order, getStatusColor, getStatusIcon, formatStatus }) =>
   useEffect(() => {
     if (!order?.orderId) {
       setEvents([]);
+      setDriverLocation(null);
       return;
     }
 
@@ -57,14 +60,41 @@ const OrderDetails = ({ order, getStatusColor, getStatusIcon, formatStatus }) =>
 
     loadEvents();
 
-    // Subscribe to SSE updates
-    const sseSource = orderEndpoints.trackOrder(order.orderId, (update) => {
-      if (!isMounted) return;
-      if (update && typeof update === 'object' && update.status) {
-        setCurrentStatus(update.status);
+    // Subscribe to SSE updates (order updates + real-time telematics location)
+    const sseSource = orderEndpoints.trackOrder(
+      order.orderId,
+      (update) => {
+        if (!isMounted) return;
+        if (update && typeof update === 'object') {
+          if (update.type === 'location-update' || (update.latitude && update.longitude)) {
+            setDriverLocation({
+              latitude: Number(update.latitude),
+              longitude: Number(update.longitude),
+              speed: Number(update.speed || 0),
+              heading: Number(update.heading || 0),
+              timestamp: update.timestamp,
+            });
+            return;
+          }
+          if (update.status) {
+            setCurrentStatus(update.status);
+          }
+        }
+        loadEvents();
+      },
+      (locUpdate) => {
+        if (!isMounted) return;
+        if (locUpdate && locUpdate.latitude && locUpdate.longitude) {
+          setDriverLocation({
+            latitude: Number(locUpdate.latitude),
+            longitude: Number(locUpdate.longitude),
+            speed: Number(locUpdate.speed || 0),
+            heading: Number(locUpdate.heading || 0),
+            timestamp: locUpdate.timestamp,
+          });
+        }
       }
-      loadEvents();
-    });
+    );
 
     return () => {
       isMounted = false;
@@ -193,6 +223,15 @@ const OrderDetails = ({ order, getStatusColor, getStatusIcon, formatStatus }) =>
           <Clock size={16} /> <span className="order-detail-label">ETA:</span> {order.estimatedDelivery}
         </div>
       )}
+
+      {/* Interactive Live Delivery Map with Real-Time Telematics */}
+      <LiveDeliveryMap
+        orderId={order.orderId}
+        destinationAddress={order.deliveryAddress}
+        destinationCity={order.destinationCity}
+        driverLocation={driverLocation}
+        status={currentStatus}
+      />
 
       {/* Proof of Delivery (POD) Section */}
       {hasPodData && !isFailed && (

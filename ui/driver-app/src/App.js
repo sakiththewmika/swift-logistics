@@ -40,7 +40,7 @@ const MainDriverApp = () => {
   const nextDelivery = deliveries.find(d =>
     d.status === 'ASSIGNED' || d.status === 'ROUTED' || d.status === 'IN_TRANSIT'
   );
-  const websocketConnected = useDriverWebSocket(
+  const { connected: websocketConnected, publishLocation } = useDriverWebSocket(
     driver?.driverId, nextDelivery?.id ?? nextDelivery?.orderId, handleDispatch
   );
   const completedCount = deliveries.filter(d => d.status === 'COMPLETED' || d.status === 'DELIVERED').length;
@@ -158,6 +158,9 @@ const MainDriverApp = () => {
         <CurrentLocationCard
           currentLocation={currentLocation}
           onUpdateLocation={handleUpdateLocation}
+          delivery={nextDelivery}
+          publishLocation={publishLocation}
+          websocketConnected={websocketConnected}
         />
       </div>
       <StatusUpdateModal

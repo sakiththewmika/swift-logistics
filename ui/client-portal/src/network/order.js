@@ -21,7 +21,7 @@ export const orderEndpoints = {
     return await NETWORK.get(`/drivers/driver/${driverId}`);
   },
 
-  trackOrder(orderId, onMessage) {
+  trackOrder(orderId, onMessage, onLocation) {
     const baseUrl = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000/api/v1';
     const sseHost = baseUrl.replace(/\/api\/v1\/?$/, '');
     const url = `${sseHost}/sse/order/${orderId}`;
@@ -44,6 +44,19 @@ export const orderEndpoints = {
           onMessage?.(update);
         } catch {
           onMessage?.(event.data);
+        }
+      });
+
+      source.addEventListener('location-update', function (event) {
+        try {
+          const loc = JSON.parse(event.data);
+          if (onLocation) {
+            onLocation(loc);
+          } else {
+            onMessage?.({ type: 'location-update', ...loc });
+          }
+        } catch {
+          // Ignore parse errors on malformed ping
         }
       });
 

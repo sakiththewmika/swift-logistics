@@ -261,3 +261,20 @@
 .create-order-btn:hover {
   background: #1d4ed8;
 }
+
+/* Leaflet Map & Pulse Animation */
+.leaflet-container {
+  font-family: inherit;
+}
+
+@keyframes leaflet-ping {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.8;
+  }
+  70%, 100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
