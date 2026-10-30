@@ -79,7 +79,8 @@ services:
       - "8000:8000" # Application port
       - "8080:8000" # Compatibility port for STOMP WebSocket & driver-app API
     env_file:
-      - ../services/orchestrator/.env
+      - path: ../services/orchestrator/.env
+        required: false
     environment:
       MONGODB_URI: mongodb://mongo:27017/swift-logic?replicaSet=rs0
       RABBITMQ_HOST: rabbitmq
@@ -108,7 +109,8 @@ services:
     ports:
       - "8003:8003" # Application port
     env_file:
-      - ../services/wms-adapter/app/.env
+      - path: ../services/wms-adapter/app/.env
+        required: false
     environment:
       RABBITMQ_HOST: rabbitmq
       WMS_DEBUG: "false"
@@ -135,7 +137,8 @@ services:
     ports:
       - "8004:8004" # Application port
     env_file:
-      - ../services/ros-integration/.env
+      - path: ../services/ros-integration/.env
+        required: false
     environment:
       ADAPTER_PORT: 8004
       MONGO_URI: mongodb://mongo:27017/swift-logic?replicaSet=rs0
@@ -185,7 +188,8 @@ services:
     ports:
       - "8001:8001" # Application port
     env_file:
-      - ../services/cms-adapter/.env
+      - path: ../services/cms-adapter/.env
+        required: false
     environment:
       RABBITMQ_HOST: rabbitmq
       MONGODB_URI: mongodb://mongo:27017/swift-logic?replicaSet=rs0

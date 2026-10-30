@@ -108,5 +108,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Prepare environment files
+        run: |
+          for f in services/orchestrator services/cms-adapter services/ros-integration services/wms-adapter/app; do
+            if [ -f "$f/.env.example" ] && [ ! -f "$f/.env" ]; then
+              cp "$f/.env.example" "$f/.env"
+            elif [ ! -f "$f/.env" ]; then
+              touch "$f/.env"
+            fi
+          done
+
       - name: Validate Docker Compose Configuration
         run: docker compose -f infra/docker-compose.yml config --quiet
