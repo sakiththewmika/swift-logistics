@@ -69,6 +69,7 @@ class RabbitMQClientTests(unittest.TestCase):
         install_stub_pika(channel, connection)
         client_module = import_client_module()
         client = client_module.RabbitMQClient()
+        self.addCleanup(client.close)
 
         ok = client.publish('test-queue', { 'a': 1 })
 
@@ -79,6 +80,26 @@ class RabbitMQClientTests(unittest.TestCase):
         self.assertEqual(kwargs.get('routing_key'), 'test-queue')
         body = kwargs.get('body')
         self.assertEqual(json.loads(body), { 'a': 1 })
+
+    def test_publish_preserves_trace_headers(self):
+        channel = MagicMock()
+        connection = MagicMock()
+        connection.channel.return_value = channel
+        install_stub_pika(channel, connection)
+        client_module = import_client_module()
+        client = client_module.RabbitMQClient()
+        self.addCleanup(client.close)
+
+        client.publish(
+            'test-queue',
+            {'messageId': 'msg-1'},
+            'corr-1',
+            {'traceparent': '00-' + 'a' * 32 + '-' + 'b' * 16 + '-01'},
+        )
+
+        properties = channel.basic_publish.call_args.kwargs['properties']
+        self.assertEqual(properties.headers['X-Correlation-Id'], 'corr-1')
+        self.assertTrue(properties.headers['traceparent'].startswith('00-'))
 
     def test_consume_invokes_callback_and_acks(self):
         # Set up channel to capture callback
@@ -107,6 +128,7 @@ class RabbitMQClientTests(unittest.TestCase):
         install_stub_pika(channel, connection)
         client_module = import_client_module()
         client = client_module.RabbitMQClient()
+        self.addCleanup(client.close)
 
         received = []
         def cb(msg):
@@ -116,6 +138,71 @@ class RabbitMQClientTests(unittest.TestCase):
 
         self.assertEqual(received, [{'x': 2}])
         channel.basic_ack.assert_called_once()
+
+    def test_duplicate_is_acknowledged_without_second_callback(self):
+        channel = MagicMock()
+        captured = {}
+
+        def basic_consume(queue, on_message_callback, auto_ack=False):
+            captured['cb'] = on_message_callback
+
+        def start_consuming_side_effect():
+            method = types.SimpleNamespace(delivery_tag=1)
+            properties = types.SimpleNamespace(message_id='msg-1', headers={})
+            body = json.dumps({'orderId': 'order-1'}).encode()
+            captured['cb'](channel, method, properties, body)
+            method.delivery_tag = 2
+            captured['cb'](channel, method, properties, body)
+
+        channel.basic_consume.side_effect = basic_consume
+        channel.start_consuming.side_effect = start_consuming_side_effect
+        connection = MagicMock()
+        connection.channel.return_value = channel
+        install_stub_pika(channel, connection)
+        client_module = import_client_module()
+        client = client_module.RabbitMQClient()
+        self.addCleanup(client.close)
+        received = []
+
+        client.consume('orders', lambda message: received.append(message))
+
+        self.assertEqual(len(received), 1)
+        self.assertEqual(channel.basic_ack.call_count, 2)
+
+    def test_failed_callback_releases_dedup_lock(self):
+        channel = MagicMock()
+        captured = {}
+
+        def basic_consume(queue, on_message_callback, auto_ack=False):
+            captured['cb'] = on_message_callback
+
+        def start_consuming_side_effect():
+            method = types.SimpleNamespace(delivery_tag=1)
+            properties = types.SimpleNamespace(message_id='msg-1', headers={})
+            body = json.dumps({'orderId': 'order-2'}).encode()
+            captured['cb'](channel, method, properties, body)
+            method.delivery_tag = 2
+            captured['cb'](channel, method, properties, body)
+
+        channel.basic_consume.side_effect = basic_consume
+        channel.start_consuming.side_effect = start_consuming_side_effect
+        connection = MagicMock()
+        connection.channel.return_value = channel
+        install_stub_pika(channel, connection)
+        client_module = import_client_module()
+        client = client_module.RabbitMQClient()
+        attempts = []
+
+        def callback(message):
+            attempts.append(message)
+            if len(attempts) == 1:
+                raise RuntimeError('temporary failure')
+
+        client.consume('orders', callback)
+
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(channel.basic_nack.call_args.kwargs['requeue'], True)
+        self.assertEqual(channel.basic_ack.call_count, 1)
 
 
 if __name__ == '__main__':

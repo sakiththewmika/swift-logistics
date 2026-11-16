@@ -99,12 +99,37 @@ processed_message_lock = Lock()
 dedup_connection = sqlite3.connect(
     os.getenv("DEDUP_DB_PATH", "/tmp/swift-ros-dedup.db"), check_same_thread=False
 )
+dedup_connection.execute("PRAGMA journal_mode=WAL")
+dedup_connection.execute("PRAGMA synchronous=NORMAL")
+dedup_connection.execute("PRAGMA busy_timeout=5000")
 dedup_connection.execute(
     "CREATE TABLE IF NOT EXISTS processed_orders "
-    "(dedup_key TEXT PRIMARY KEY, status TEXT NOT NULL)"
+    "(dedup_key TEXT PRIMARY KEY, status TEXT NOT NULL, "
+    "created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')))"
 )
+columns = {
+    row[1] for row in dedup_connection.execute("PRAGMA table_info(processed_orders)")
+}
+if "created_at" not in columns:
+    dedup_connection.execute("ALTER TABLE processed_orders ADD COLUMN created_at INTEGER")
+    dedup_connection.execute(
+        "UPDATE processed_orders SET created_at = strftime('%s','now') "
+        "WHERE created_at IS NULL"
+    )
 dedup_connection.commit()
 dedup_lock = Lock()
+last_dedup_cleanup = 0
+
+
+def cleanup_expired_dedup_records(retention_seconds=86400):
+    global last_dedup_cleanup
+    cutoff = int(time.time()) - retention_seconds
+    with dedup_lock:
+        dedup_connection.execute(
+            "DELETE FROM processed_orders WHERE created_at < ?", (cutoff,)
+        )
+        dedup_connection.commit()
+    last_dedup_cleanup = time.time()
 
 
 class CircuitOpenError(RuntimeError):
@@ -198,6 +223,8 @@ async def start_consumer():
 async def process_message(channel, method_frame, properties, body):
     """Main logic for processing a single order message."""
     order_data = json.loads(body)
+    if time.time() - last_dedup_cleanup >= 3600:
+        cleanup_expired_dedup_records()
     order_id = order_data.get("orderId")
     message_id = order_data.get("messageId") or order_id
     correlation_id = get_correlation_id(properties)
@@ -297,8 +324,8 @@ def acquire_dedup(dedup_key):
     with dedup_lock:
         try:
             dedup_connection.execute(
-                "INSERT INTO processed_orders (dedup_key, status) VALUES (?, ?)",
-                (dedup_key, "PROCESSING"),
+                "INSERT INTO processed_orders (dedup_key, status, created_at) VALUES (?, ?, ?)",
+                (dedup_key, "PROCESSING", int(time.time())),
             )
             dedup_connection.commit()
             return True

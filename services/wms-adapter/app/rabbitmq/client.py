@@ -72,16 +72,43 @@ class RabbitMQClient:
         self.processed_message_ids = set()
         self.retry_counts = {}
         self.dedup_lock = threading.Lock()
+        self._last_dedup_cleanup = 0
         dedup_path = os.getenv("DEDUP_DB_PATH", "/tmp/swift-wms-dedup.db")
         self.dedup_connection = sqlite3.connect(dedup_path, check_same_thread=False)
+        self.dedup_connection.execute("PRAGMA journal_mode=WAL")
+        self.dedup_connection.execute("PRAGMA synchronous=NORMAL")
+        self.dedup_connection.execute("PRAGMA busy_timeout=5000")
         self.dedup_connection.execute(
             "CREATE TABLE IF NOT EXISTS processed_orders "
-            "(dedup_key TEXT PRIMARY KEY, status TEXT NOT NULL)"
+            "(dedup_key TEXT PRIMARY KEY, status TEXT NOT NULL, "
+            "created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')))"
         )
+        columns = {
+            row[1]
+            for row in self.dedup_connection.execute("PRAGMA table_info(processed_orders)")
+        }
+        if "created_at" not in columns:
+            self.dedup_connection.execute(
+                "ALTER TABLE processed_orders ADD COLUMN created_at INTEGER"
+            )
+            self.dedup_connection.execute(
+                "UPDATE processed_orders SET created_at = strftime('%s','now') "
+                "WHERE created_at IS NULL"
+            )
         self.dedup_connection.commit()
+        self.cleanup_expired_dedup_records()
 
         # Create a connection only for consuming (persistent)
         self.consumer_connections = []
+
+    def cleanup_expired_dedup_records(self, retention_seconds=86400):
+        cutoff = int(time.time()) - retention_seconds
+        with self.dedup_lock:
+            self.dedup_connection.execute(
+                "DELETE FROM processed_orders WHERE created_at < ?", (cutoff,)
+            )
+            self.dedup_connection.commit()
+        self._last_dedup_cleanup = time.time()
 
     def _new_connection(self):
         return pika.BlockingConnection(
@@ -159,6 +186,8 @@ class RabbitMQClient:
         channel.queue_declare(queue=queue, durable=True, arguments=queue_args)
 
         def on_message(ch, method, properties, body):
+            if time.time() - self._last_dedup_cleanup >= 3600:
+                self.cleanup_expired_dedup_records()
             message = json.loads(body.decode())
             message_id = (properties.message_id if properties else None) or message.get("messageId") or message.get("orderId")
             step = "WMS_COMPENSATION" if queue == "warehouse-compensation" else "WMS_PACKAGING"
