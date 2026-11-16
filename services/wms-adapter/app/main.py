@@ -1,12 +1,13 @@
 import os
 import threading
+import time
 import uuid
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
 
 from wms.mssg_parser import parse_string_to_dict, parse_dict_to_string
-from rabbitmq.client import RabbitMQClient
+from rabbitmq.client import RabbitMQClient, emit_zipkin_span
 from wms.client import WMSClient
 from consul import register_service
 
@@ -34,22 +35,50 @@ def handle_message(message):
     parsed_mssg = parse_string_to_dict(message)
     parsed_mssg["messageId"] = str(uuid.uuid4())
     print(f"[WMS-ADAPTER] Parsed WMS message: {parsed_mssg}")
-    # publish_to_queue("wms", parsed_mssg)
-    correlation_id = correlation_ids_by_order.pop(parsed_mssg.get("orderId"), None)
-    rabbitmq_client.publish("warehouse-updates", parsed_mssg, correlation_id)
+    context = correlation_ids_by_order.pop(parsed_mssg.get("orderId"), {})
+    correlation_id = context.get("correlation_id")
+    headers = context.get("headers", {})
+    start_time_us = context.get("start_time_us", time.time_ns() // 1000)
+    traceparent = emit_zipkin_span(
+        "wms-adapter",
+        "wms.process",
+        headers,
+        correlation_id,
+        start_time_us,
+        (time.time_ns() // 1000) - start_time_us,
+    )
+    rabbitmq_client.publish(
+        "warehouse-updates",
+        parsed_mssg,
+        correlation_id,
+        {**headers, "traceparent": traceparent},
+    )
 
 def handle_compensation(message, properties=None):
     parsed_message = parse_string_to_dict(message)
     if parsed_message.get("status") != "PACKAGE_RELEASED":
         raise ValueError(f"Unexpected WMS compensation response: {message}")
+    headers = dict((properties.headers if properties else {}) or {})
+    traceparent = emit_zipkin_span(
+        "wms-adapter",
+        "wms.compensation",
+        headers,
+        get_correlation_id(properties),
+        time.time_ns() // 1000,
+        1,
+    )
     rabbitmq_client.publish("warehouse-updates", {
         "messageId": str(uuid.uuid4()),
         "orderId": parsed_message["orderId"],
         "status": "PACKAGE_RELEASED"
-    }, get_correlation_id(properties))
+    }, get_correlation_id(properties), {**headers, "traceparent": traceparent})
 
 def process_order(message, properties=None):
-    correlation_ids_by_order[message.get("orderId")] = get_correlation_id(properties)
+    correlation_ids_by_order[message.get("orderId")] = {
+        "correlation_id": get_correlation_id(properties),
+        "headers": dict((properties.headers if properties else {}) or {}),
+        "start_time_us": time.time_ns() // 1000,
+    }
     parsed_order = parse_dict_to_string(message)
     wms_client.send_order(parsed_order)
 
@@ -57,7 +86,11 @@ def process_compensation(message, properties=None):
     order_id = message.get("orderId")
     if not order_id:
         raise ValueError("Warehouse compensation message is missing orderId")
-    correlation_ids_by_order[order_id] = get_correlation_id(properties)
+    correlation_ids_by_order[order_id] = {
+        "correlation_id": get_correlation_id(properties),
+        "headers": dict((properties.headers if properties else {}) or {}),
+        "start_time_us": time.time_ns() // 1000,
+    }
     wms_client.cancel_package(order_id)
 
 

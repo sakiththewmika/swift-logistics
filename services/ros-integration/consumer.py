@@ -5,11 +5,69 @@ import sqlite3
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import asyncio
+import hashlib
+import re
+import time
+import urllib.request
 from urllib.parse import urlparse
 from datetime import datetime, timezone
 from threading import Lock
 from time import monotonic
 from consul import discover_service
+
+
+def _header_value(headers, name):
+    value = headers.get(name) or headers.get(name.lower())
+    if value is None:
+        value = headers.get(name.encode())
+    if isinstance(value, bytes):
+        return value.decode()
+    return value
+
+
+def _trace_context(headers, correlation_id):
+    headers = headers or {}
+    traceparent = _header_value(headers, "traceparent")
+    match = re.fullmatch(r"00-([0-9a-fA-F]{32})-([0-9a-fA-F]{16})-[0-9a-fA-F]{2}", str(traceparent or ""))
+    if match:
+        return match.group(1).lower(), match.group(2).lower()
+
+    trace_id = _header_value(headers, "X-B3-TraceId")
+    parent_id = _header_value(headers, "X-B3-SpanId")
+    if trace_id and re.fullmatch(r"[0-9a-fA-F]{16,32}", str(trace_id)):
+        return str(trace_id).lower().zfill(32), str(parent_id).lower() if parent_id else None
+
+    seed = str(correlation_id or os.urandom(16).hex()).encode()
+    return hashlib.sha256(seed).hexdigest()[:32], None
+
+
+def emit_zipkin_span(service_name, span_name, headers, correlation_id, start_time_us, duration_us, tags=None):
+    trace_id, parent_span_id = _trace_context(headers, correlation_id)
+    span_id = os.urandom(8).hex()
+    span = {
+        "traceId": trace_id,
+        "parentId": parent_span_id,
+        "id": span_id,
+        "name": span_name,
+        "kind": "CONSUMER",
+        "timestamp": start_time_us,
+        "duration": max(duration_us, 1),
+        "localEndpoint": {"serviceName": service_name},
+        "tags": {"correlationId": str(correlation_id), **(tags or {})},
+    }
+    endpoint = os.getenv("ZIPKIN_ENDPOINT", "http://zipkin:9411/api/v2/spans")
+    try:
+        request = urllib.request.Request(
+            endpoint,
+            data=json.dumps([span]).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=1.0):
+            pass
+    except Exception as exc:
+        print(f"[ZIPKIN] Span export unavailable: {exc}")
+    return f"00-{trace_id}-{span_id}-01"
 
 # --- Configuration ---
 # Using environment variables for configuration is a best practice.
@@ -143,6 +201,8 @@ async def process_message(channel, method_frame, properties, body):
     order_id = order_data.get("orderId")
     message_id = order_data.get("messageId") or order_id
     correlation_id = get_correlation_id(properties)
+    inbound_headers = dict((properties.headers if properties else {}) or {})
+    start_time_us = time.time_ns() // 1000
     dedup_key = f"{order_id}:ROS_ROUTING"
     if not acquire_dedup(dedup_key):
         channel.basic_ack(delivery_tag=method_frame.delivery_tag)
@@ -183,6 +243,14 @@ async def process_message(channel, method_frame, properties, body):
 
     route_data = await call_ros_with_fallback(ros_payload)
     print(f"ROS API response: {route_data}")
+    traceparent = emit_zipkin_span(
+        "ros-integration",
+        "ros.route",
+        inbound_headers,
+        correlation_id,
+        start_time_us,
+        (time.time_ns() // 1000) - start_time_us,
+    )
 
     # 3. Publish the result back to the orchestrator.
     result_payload = json.dumps({
@@ -202,7 +270,11 @@ async def process_message(channel, method_frame, properties, body):
             delivery_mode=2,
             message_id=message_id,
             correlation_id=correlation_id,
-            headers={"X-Correlation-Id": correlation_id} if correlation_id else {},
+            headers={
+                **inbound_headers,
+                "traceparent": traceparent,
+                **({"X-Correlation-Id": correlation_id} if correlation_id else {}),
+            },
         ),
     )
     print(f"Published routing result for Order ID: {order_id}")

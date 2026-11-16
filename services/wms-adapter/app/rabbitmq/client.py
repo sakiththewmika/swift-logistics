@@ -1,7 +1,68 @@
 import inspect
 import sqlite3
 import threading
-import pika, json, os
+import hashlib
+import json
+import os
+import re
+import time
+import urllib.request
+
+import pika
+
+
+def _header_value(headers, name):
+    value = headers.get(name) or headers.get(name.lower())
+    if value is None:
+        value = headers.get(name.encode())
+    if isinstance(value, bytes):
+        return value.decode()
+    return value
+
+
+def _trace_context(headers, correlation_id):
+    headers = headers or {}
+    traceparent = _header_value(headers, "traceparent")
+    match = re.fullmatch(r"00-([0-9a-fA-F]{32})-([0-9a-fA-F]{16})-[0-9a-fA-F]{2}", str(traceparent or ""))
+    if match:
+        return match.group(1).lower(), match.group(2).lower()
+
+    trace_id = _header_value(headers, "X-B3-TraceId")
+    parent_id = _header_value(headers, "X-B3-SpanId")
+    if trace_id and re.fullmatch(r"[0-9a-fA-F]{16,32}", str(trace_id)):
+        return str(trace_id).lower().zfill(32), str(parent_id).lower() if parent_id else None
+
+    seed = str(correlation_id or os.urandom(16).hex()).encode()
+    return hashlib.sha256(seed).hexdigest()[:32], None
+
+
+def emit_zipkin_span(service_name, span_name, headers, correlation_id, start_time_us, duration_us, tags=None):
+    trace_id, parent_span_id = _trace_context(headers, correlation_id)
+    span_id = os.urandom(8).hex()
+    span = {
+        "traceId": trace_id,
+        "parentId": parent_span_id,
+        "id": span_id,
+        "name": span_name,
+        "kind": "CONSUMER",
+        "timestamp": start_time_us,
+        "duration": max(duration_us, 1),
+        "localEndpoint": {"serviceName": service_name},
+        "tags": {"correlationId": str(correlation_id), **(tags or {})},
+    }
+    endpoint = os.getenv("ZIPKIN_ENDPOINT", "http://zipkin:9411/api/v2/spans")
+    try:
+        request = urllib.request.Request(
+            endpoint,
+            data=json.dumps([span]).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=1.0):
+            pass
+    except Exception as exc:
+        print(f"[ZIPKIN] Span export unavailable: {exc}")
+    return f"00-{trace_id}-{span_id}-01"
 
 
 class RabbitMQClient:
@@ -49,7 +110,7 @@ class RabbitMQClient:
         channel = connection.channel()
         return connection, channel
 
-    def publish(self, queue, message, correlation_id=None):
+    def publish(self, queue, message, correlation_id=None, headers=None):
         """Publish using a fresh connection to avoid thread issues."""
         connection, channel = self._new_publish_channel()
         try:
@@ -68,7 +129,10 @@ class RabbitMQClient:
                             delivery_mode=2,
                             message_id=message.get("messageId"),
                             correlation_id=correlation_id,
-                            headers={"X-Correlation-Id": correlation_id} if correlation_id else {},
+                            headers={
+                                **(headers or {}),
+                                **({"X-Correlation-Id": correlation_id} if correlation_id else {}),
+                            },
                         )
                     )
                     break
@@ -115,6 +179,7 @@ class RabbitMQClient:
                     ch.basic_ack(delivery_tag=method.delivery_tag)
                     return
             try:
+                start_time_us = time.time_ns() // 1000
                 parameters = inspect.signature(callback).parameters
                 if len(parameters) >= 2:
                     callback(message, properties)
