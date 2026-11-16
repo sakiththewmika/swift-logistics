@@ -26,7 +26,7 @@ flowchart TD
     end
 
     subgraph Middleware["Distributed Middleware Tier"]
-        GW["Swift Orchestrator (:8000 / :8080)<br/>• Spring Boot 3.2.5 & Java 21<br/>• BCrypt Hashing & JWT Bearer Auth<br/>• Swagger / OpenAPI 3.0 Console<br/>• Saga Transaction Orchestrator<br/>• Transactional Outbox Relayer<br/>• STOMP Broker & SSE Dispatcher"]
+        GW["Swift Orchestrator (:8080 host / :8000 container)<br/>• Spring Boot 3.2.5 & Java 21<br/>• BCrypt Hashing & JWT Bearer Auth<br/>• Swagger / OpenAPI 3.0 Console<br/>• Saga Transaction Orchestrator<br/>• Transactional Outbox Relayer<br/>• STOMP Broker & SSE Dispatcher"]
         
         RMQ["RabbitMQ Event Broker (:5672 / :15672)<br/>• Topic Exchange: order-exchange<br/>• Routing Keys & Dead-Letter Queues (order.dlq)<br/>• Correlated Publisher Confirms"]
         
@@ -37,13 +37,13 @@ flowchart TD
 
     subgraph Adapters["Integration Adapters & Legacy Backends"]
         CMSA["CMS Adapter (:8001)<br/>Spring Boot SOAP Client"]
-        LCMS["Legacy CMS (:8081)<br/>SOAP / XML Invoicing"]
+        LCMS["Legacy CMS mock (inside cms-adapter, :5001)<br/>SOAP / XML Invoicing"]
 
-        ROSA["ROS Integration (:8002)<br/>FastAPI / Python Client"]
-        LROS["Legacy ROS (:8082)<br/>REST Routing Engine"]
+        ROSA["ROS Integration (:8004)<br/>FastAPI / Python Client"]
+        LROS["ROS mock (inside ros-integration)<br/>REST Routing Engine"]
 
         WMSA["WMS Adapter (:8003)<br/>Python TCP Socket Client & Dedup"]
-        LWMS["Legacy WMS (:9000)<br/>Raw TCP/IP Frame Socket"]
+        LWMS["WMS mock (inside wms-adapter, :9000)<br/>Raw TCP/IP Frame Socket"]
     end
 
     CP -- "REST (JWT) / SSE" --> GW
@@ -96,7 +96,7 @@ flowchart TD
 
 ### Prerequisites
 - **Docker Engine** (24.0+) & **Docker Compose v2**
-- Host ports available: `3000`, `3001`, `8000`, `8080`, `8500`, `9411`, `15672`, `27017`
+- Host ports available: `3000`, `3001`, `5001`, `5672`, `8001`, `8003`, `8004`, `8080`, `8500`, `9411`, `15672`, `27017`
 
 ### 1. Launch the Complete Ecosystem
 ```bash
@@ -131,18 +131,17 @@ Wait ~30 seconds for MongoDB replica set initialization and Consul service regis
 |---------|------------|------|---------------------|
 | **Client Portal** | React 19 / Leaflet | **3000** | Customer dashboard, KPI ribbon & live order tracking |
 | **Driver App** | React 19 / STOMP | **3001** | Courier HUD, GPS telematics simulator & POD capture |
-| **Swift Orchestrator** | Spring Boot 3.2.5 | **8000 / 8080** | Core API, Saga orchestrator, WebSocket & Outbox |
+| **Swift Orchestrator** | Spring Boot 3.2.5 | **8080 host / 8000 container** | Core API, Saga orchestrator, WebSocket & Outbox |
 | **Swagger UI** | SpringDoc OpenAPI 3 | **8080** | [`http://localhost:8080/swagger-ui.html`](http://localhost:8080/swagger-ui.html) |
-| **HashiCorp Consul** | Go / Consul UI | **8500** | Service discovery catalog & health monitoring |
+| **HashiCorp Consul** | Go / Consul UI | **8500 / 8600 UDP** | Service discovery catalog, health monitoring & DNS |
 | **OpenZipkin** | Zipkin UI | **9411** | Distributed trace waterfall visualization |
-| **RabbitMQ Management**| Erlang / AMQP | **15672** | Broker queues, bindings, exchanges & DLQ inspection |
-| **MongoDB** | MongoDB 7 Replica Set| **27017** | Document datastore with replica set transactions |
+| **RabbitMQ** | Erlang / AMQP | **5672 / 15672** | AMQP broker and management UI for queues, bindings, exchanges & DLQs |
+| **MongoDB** | MongoDB 7 Replica Set (`rs0`) | **27017** | Document datastore with replica set transactions |
 | **CMS Adapter** | Spring Boot / JAXB | **8001** | SOAP $\leftrightarrow$ AMQP mediation |
-| **ROS Integration** | FastAPI / Python | **8002** | REST $\leftrightarrow$ AMQP route optimization adapter |
 | **WMS Adapter** | Python Asyncio | **8003** | TCP socket $\leftrightarrow$ AMQP warehouse adapter |
-| **Legacy CMS** | Spring Boot SOAP | **8081** | Simulated legacy billing engine |
-| **Legacy ROS** | Python REST | **8082** | Simulated legacy route solver |
-| **Legacy WMS** | Python TCP Server | **9000** | Simulated legacy warehouse TCP socket |
+| **ROS Integration** | FastAPI / Python | **8004** | REST $\leftrightarrow$ AMQP route optimization adapter |
+| **Legacy CMS mock (`cms`)** | Spring Boot SOAP | **5001** | Simulated legacy billing engine |
+| **WMS mock** | Python TCP server inside `wms-adapter` | **9000 internal** | Simulated legacy warehouse TCP socket |
 
 ---
 

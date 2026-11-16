@@ -14,9 +14,8 @@ wms_client = WMSClient()
 rabbitmq_client = RabbitMQClient()
 correlation_ids_by_order = {}
 
-# TODO: secure the .env file
 dotenv_path = os.path.join(os.path.dirname(__file__), ".env")
-load_dotenv(dotenv_path)
+load_dotenv(dotenv_path, override=False)
 
 app = FastAPI()
 

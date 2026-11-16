@@ -817,7 +817,7 @@ const SystemOpsModal = ({ onClose, onOrderCreated, customerId = 'CUST-001' }) =>
 
                 {/* Actuator */}
                 <a
-                  href="http://localhost:8000/actuator/health"
+                  href="http://localhost:8080/actuator/health"
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{
@@ -840,7 +840,7 @@ const SystemOpsModal = ({ onClose, onOrderCreated, customerId = 'CUST-001' }) =>
                     Production metrics, CircuitBreaker state (Resilience4j), and thread pool telemetry.
                   </p>
                   <span style={{ fontSize: 11, color: '#2563eb', marginTop: 8, display: 'inline-block' }}>
-                    http://localhost:8000/actuator/health →
+                    http://localhost:8080/actuator/health →
                   </span>
                 </a>
 
