@@ -262,7 +262,7 @@ const OrderDetails = ({ order, getStatusColor, getStatusIcon, formatStatus }) =>
       <LiveDeliveryMap
         orderId={order.orderId}
         destinationAddress={order.deliveryAddress}
-        destinationCity={order.destinationCity}
+        destinationCity={order.city || order.destinationCity}
         driverLocation={driverLocation}
         status={currentStatus}
       />

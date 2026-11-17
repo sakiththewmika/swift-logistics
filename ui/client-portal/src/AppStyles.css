@@ -6,9 +6,9 @@
   font-family: Arial, sans-serif;
 }
 .header {
-  background-color: white;
+  background-color: #0f172a;
   box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid #1e293b;
 }
 .header-content {
   max-width: 1280px;
@@ -27,7 +27,7 @@
 .logo-text {
   font-size: 20px;
   font-weight: 600;
-  color: #111827;
+  color: #f8fafc;
 }
 .header-actions {
   display: flex;
@@ -37,7 +37,7 @@
 .notification-bell {
   position: relative;
   padding: 8px;
-  color: #6b7280;
+  color: #e2e8f0;
   border: none;
   background: none;
   border-radius: 50%;
@@ -110,6 +110,18 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  color: #e2e8f0;
+}
+.user-info button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  color: #fca5a5;
+  background: #334155;
+  border: 1px solid #475569;
+  border-radius: 6px;
+  cursor: pointer;
 }
 .order-list {
   background: white;

@@ -185,6 +185,25 @@ const LiveDeliveryMap = ({
     };
   }, []);
 
+  useEffect(() => {
+    const newDest = resolveDestinationCoords(destinationAddress, destinationCity);
+    if (!mapInstanceRef.current || !destMarkerRef.current || !routeLineRef.current) return;
+
+    destMarkerRef.current.setLatLng(newDest);
+    destMarkerRef.current.setPopupContent(`
+      <div style="font-family:sans-serif; font-size:12px; line-height:1.4;">
+        <strong style="color:#ef4444;">📍 Next Drop-off Location</strong><br/>
+        ${destinationAddress || 'Colombo Delivery Address'}<br/>
+        <span style="color:#64748b; font-size:11px;">${destinationCity || 'Colombo'}</span>
+      </div>
+    `);
+    routeLineRef.current.setLatLngs([WAREHOUSE_COORDS, newDest]);
+    mapInstanceRef.current.fitBounds(L.latLngBounds([WAREHOUSE_COORDS, newDest]), {
+      padding: [40, 40],
+      maxZoom: 14,
+    });
+  }, [destinationAddress, destinationCity]);
+
   // Update truck position dynamically
   useEffect(() => {
     if (!truckMarkerRef.current || !driverLocation) return;

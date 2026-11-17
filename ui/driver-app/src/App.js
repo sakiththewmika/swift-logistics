@@ -97,7 +97,7 @@ const MainDriverApp = () => {
       const deliveryObj = targetDelivery || nextDelivery;
       const destCoords = resolveDestinationCoords(
         deliveryObj?.deliveryAddress,
-        deliveryObj?.destinationCity
+        deliveryObj?.city || deliveryObj?.destinationCity
       );
       const activeOrderId = deliveryObj?.id ?? deliveryObj?.orderId;
 
@@ -151,7 +151,7 @@ const MainDriverApp = () => {
     setIsSimulating(false);
     const destCoords = resolveDestinationCoords(
       nextDelivery?.deliveryAddress,
-      nextDelivery?.destinationCity
+      nextDelivery?.city || nextDelivery?.destinationCity
     );
     const activeOrderId = nextDelivery?.id ?? nextDelivery?.orderId;
 

@@ -98,6 +98,7 @@ const LiveDeliveryMap = ({
   const mapInstanceRef = useRef(null);
   const truckMarkerRef = useRef(null);
   const routeLineRef = useRef(null);
+  const destMarkerRef = useRef(null);
 
   const destCoords = resolveDestinationCoords(destinationAddress, destinationCity);
 
@@ -155,6 +156,7 @@ const LiveDeliveryMap = ({
         <span style="color:#64748b; font-size:11px;">${destinationCity || 'Colombo'}</span>
       </div>
     `);
+    destMarkerRef.current = destMarker;
 
     // Route Polyline
     const routeLine = L.polyline([WAREHOUSE_COORDS, destCoords], {
@@ -204,6 +206,25 @@ const LiveDeliveryMap = ({
       }
     };
   }, []);
+
+  useEffect(() => {
+    const newDest = resolveDestinationCoords(destinationAddress, destinationCity);
+    if (!mapInstanceRef.current || !destMarkerRef.current || !routeLineRef.current) return;
+
+    destMarkerRef.current.setLatLng(newDest);
+    destMarkerRef.current.setPopupContent(`
+      <div style="font-family:sans-serif; font-size:12px; line-height:1.4;">
+        <strong style="color:#ef4444;">📍 Customer Destination</strong><br/>
+        ${destinationAddress || 'Colombo Delivery Address'}<br/>
+        <span style="color:#64748b; font-size:11px;">${destinationCity || 'Colombo'}</span>
+      </div>
+    `);
+    routeLineRef.current.setLatLngs([WAREHOUSE_COORDS, newDest]);
+    mapInstanceRef.current.fitBounds(L.latLngBounds([WAREHOUSE_COORDS, newDest]), {
+      padding: [45, 45],
+      maxZoom: 14,
+    });
+  }, [destinationAddress, destinationCity]);
 
   // Update truck position dynamically when driverLocation changes
   useEffect(() => {

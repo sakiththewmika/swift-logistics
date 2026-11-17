@@ -25,7 +25,8 @@ const CurrentLocationCard = ({
   onResetHub,
 }) => {
   const deliveryAddress = delivery?.deliveryAddress || '42 Galle Road, Colombo 03';
-  const destinationCoords = resolveDestinationCoords(deliveryAddress, delivery?.destinationCity);
+  const destinationCity = delivery?.city || delivery?.destinationCity;
+  const destinationCoords = resolveDestinationCoords(deliveryAddress, destinationCity);
   const activeOrderId = delivery?.id ?? delivery?.orderId;
 
   return (
@@ -64,7 +65,7 @@ const CurrentLocationCard = ({
         {/* Embedded Leaflet Map */}
         <LiveDeliveryMap
           destinationAddress={deliveryAddress}
-          destinationCity={delivery?.destinationCity}
+          destinationCity={destinationCity}
           driverLocation={driverCoords}
           height="280px"
         />

@@ -55,7 +55,7 @@ const OrderList = ({
       const term = searchTerm.toLowerCase();
       const idMatch = order.orderId?.toString().toLowerCase().includes(term);
       const addrMatch = order.deliveryAddress?.toLowerCase().includes(term);
-      const cityMatch = order.destinationCity?.toLowerCase().includes(term);
+      const cityMatch = (order.city || order.destinationCity)?.toLowerCase().includes(term);
       const driverMatch = order.driverName?.toLowerCase().includes(term);
       const statusMatch = order.status?.toLowerCase().includes(term);
 
