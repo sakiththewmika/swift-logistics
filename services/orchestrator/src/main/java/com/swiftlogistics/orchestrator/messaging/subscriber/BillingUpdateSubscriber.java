@@ -47,6 +47,10 @@ public class BillingUpdateSubscriber {
             } else if ("PENDING".equals(billingUpdate.getStatus())) {
                 ssePublisher.publishOrderStatusUpdate(billingUpdate.getOrderId(), OrderStatus.BILLING_PENDING,
                         "Billing is pending");
+            } else if ("CANCELLED_REFUNDED".equals(billingUpdate.getStatus())
+                    || "BILLING_REFUNDED".equals(billingUpdate.getStatus())) {
+                ssePublisher.publishOrderStatusUpdate(billingUpdate.getOrderId(),
+                        OrderStatus.CANCELLED_REFUNDED, "Order cancelled and billing refunded");
             }
             CorrelationIdContext.clear();
 

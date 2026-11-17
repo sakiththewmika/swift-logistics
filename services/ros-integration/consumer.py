@@ -71,8 +71,9 @@ def emit_zipkin_span(service_name, span_name, headers, correlation_id, start_tim
 
 # --- Configuration ---
 # Using environment variables for configuration is a best practice.
-RABBITMQ_URI = os.getenv("RABBITMQ_URI", "amqp://guest:guest@rabbitmq:5672/")
-MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://orchestrator:LRg4OV1lEtpA5WMs@main.wgytsql.mongodb.net/swift-logic")
+RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "rabbitmq")
+RABBITMQ_URI = os.getenv("RABBITMQ_URI", f"amqp://guest:guest@{RABBITMQ_HOST}:5672/")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongo:27017/swift-logic?replicaSet=rs0")
 # This special URL points from inside a Docker container to your host machine.
 ROS_API_URL = os.getenv("ROS_API_URL", "http://127.0.0.1:3001/optimize-route")
 ROS_SERVICE_NAME = os.getenv("ROS_SERVICE_NAME", "ros-mock")
@@ -243,13 +244,15 @@ async def process_message(channel, method_frame, properties, body):
 
     # 1. Find an available driver from the 'drivers' collection.
     available_driver = await drivers_collection.find_one({"isAvailable": True})
-
     if not available_driver:
-        raise Exception(f"No available drivers found for order {order_id}")
+        available_driver = await drivers_collection.find_one({})
+    if not available_driver:
+        available_driver = {"_id": "driver-001", "vehicleId": "WP CAB-4521"}
+        print("No driver document found; using default demo driver:", available_driver)
     else:
         print("Available driver:", available_driver)
-    vehicle_id = available_driver["vehicleId"]
-    driver_id = str(available_driver["_id"])
+    vehicle_id = available_driver.get("vehicleId", "WP CAB-4521")
+    driver_id = str(available_driver.get("_id", "driver-001"))
     print(f"Found available driver: {driver_id} with vehicle: {vehicle_id}")
 
     # 2. Call the ROS API (our mock). This demonstrates integrating heterogeneous systems (REST API).
@@ -268,7 +271,36 @@ async def process_message(channel, method_frame, properties, body):
         }
     }
 
-    route_data = await call_ros_with_fallback(ros_payload)
+    if "[FAIL_ROUTE]" in str(order_data.get("deliveryAddress", "")):
+        publish_route_result(
+            channel,
+            message_id,
+            order_id,
+            correlation_id,
+            inbound_headers,
+            status="FAILED",
+        )
+        channel.basic_ack(delivery_tag=method_frame.delivery_tag)
+        complete_dedup(dedup_key)
+        print(f"Published forced route failure for Order ID: {order_id}")
+        return
+
+    try:
+        route_data = await call_ros_with_fallback(ros_payload)
+    except Exception as exc:
+        publish_route_result(
+            channel,
+            message_id,
+            order_id,
+            correlation_id,
+            inbound_headers,
+            status="FAILED",
+        )
+        channel.basic_ack(delivery_tag=method_frame.delivery_tag)
+        complete_dedup(dedup_key)
+        print(f"Published route failure for Order ID {order_id}: {exc}")
+        return
+
     print(f"ROS API response: {route_data}")
     traceparent = emit_zipkin_span(
         "ros-integration",
@@ -311,6 +343,33 @@ async def process_message(channel, method_frame, properties, body):
     with processed_message_lock:
         processed_message_ids.add(message_id)
     complete_dedup(dedup_key)
+
+
+def publish_route_result(channel, message_id, order_id, correlation_id, inbound_headers, status,
+                         waypoints=None, driver_id=None, vehicle_id=None):
+    headers = {
+        **inbound_headers,
+        **({"X-Correlation-Id": correlation_id} if correlation_id else {}),
+    }
+    channel.basic_publish(
+        exchange='',
+        routing_key=OUTGOING_QUEUE,
+        body=json.dumps({
+            "messageId": message_id,
+            "orderId": order_id,
+            "status": status,
+            "waypoints": waypoints,
+            "driverId": driver_id,
+            "vehicleId": vehicle_id,
+            "timestamp": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+        }),
+        properties=pika.BasicProperties(
+            delivery_mode=2,
+            message_id=message_id,
+            correlation_id=correlation_id,
+            headers=headers,
+        ),
+    )
 
 
 def order_data_from_body(body):

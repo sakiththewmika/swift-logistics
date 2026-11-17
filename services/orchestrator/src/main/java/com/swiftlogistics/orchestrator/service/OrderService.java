@@ -281,7 +281,8 @@ public class OrderService {
 
     @Transactional
     public void processBillingUpdate(com.swiftlogistics.orchestrator.dto.BillingUpdateMessage update) {
-        if (!markMessageProcessed(update.getOrderId() + ":BILLING_UPDATE")) return;
+        String statusKey = update.getStatus() == null ? "UNKNOWN" : update.getStatus().trim().toUpperCase();
+        if (!markMessageProcessed(update.getOrderId() + ":BILLING_UPDATE:" + statusKey)) return;
         switch (update.getStatus()) {
             case "BILLED" -> {
                 updateOrderStatus(update.getOrderId(), OrderStatus.BILLED, "COMPLETED", update.getBilledAmount());
@@ -313,8 +314,8 @@ public class OrderService {
 
     @Transactional
     public void processWarehouseUpdate(com.swiftlogistics.orchestrator.dto.WarehouseUpdateMessage update) {
-        if (!markMessageProcessed(update.getOrderId() + ":WAREHOUSE_UPDATE")) return;
         String status = update.getStatus() == null ? "" : update.getStatus().trim().toUpperCase();
+        if (!markMessageProcessed(update.getOrderId() + ":WAREHOUSE_UPDATE:" + status)) return;
         if ("FAILED".equals(status)) {
             updateOrderStatus(update.getOrderId(), OrderStatus.WAREHOUSE_FAILED);
             eventService.logFailedEvent(update.getOrderId(), EventType.WAREHOUSE_FAILED,
@@ -370,8 +371,8 @@ public class OrderService {
     @Transactional
     public void processRouteUpdate(com.swiftlogistics.orchestrator.dto.RouteUpdateMessage update,
                                    RouteService routeService) {
-        if (!markMessageProcessed(update.getOrderId() + ":ROUTE_UPDATE")) return;
         String status = update.getStatus() == null ? "" : update.getStatus().trim().toUpperCase();
+        if (!markMessageProcessed(update.getOrderId() + ":ROUTE_UPDATE:" + status)) return;
         if ("ROUTED".equals(status)) {
             routeService.createOrderRoute(update.getOrderId(), update.getWaypoints(),
                     update.getDriverId(), update.getVehicleId());
