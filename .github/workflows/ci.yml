@@ -22,10 +22,10 @@ jobs:
           cache: 'maven'
 
       - name: Compile and Test Orchestrator
-        run: mvn -B test-compile --file services/orchestrator/pom.xml
+        run: mvn -B test --file services/orchestrator/pom.xml -Dtest=JwtServiceTest,IdempotencyAndDedupTest
 
       - name: Compile and Test CMS Adapter
-        run: mvn -B test-compile --file services/cms-adapter/pom.xml
+        run: mvn -B test --file services/cms-adapter/pom.xml -Dtest=OrderConsumerTest
 
       - name: Compile and Test Legacy CMS
         run: mvn -B test-compile --file legacy/cms/pom.xml

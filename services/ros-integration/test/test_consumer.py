@@ -1,5 +1,6 @@
 import asyncio
 import importlib
+import importlib.util
 import os
 import sys
 import tempfile
@@ -12,12 +13,64 @@ SERVICE_PATH = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, SERVICE_PATH)
 
 
+def install_missing_dependency_stubs():
+    if importlib.util.find_spec("pika") is None:
+        pika = types.ModuleType("pika")
+
+        class BasicProperties:
+            def __init__(self, **kwargs):
+                self.__dict__.update(kwargs)
+
+        class URLParameters:
+            def __init__(self, uri):
+                self.uri = uri
+
+        class BlockingConnection:
+            def __init__(self, *args, **kwargs):
+                raise RuntimeError("RabbitMQ is unavailable in unit tests")
+
+        pika.BasicProperties = BasicProperties
+        pika.URLParameters = URLParameters
+        pika.BlockingConnection = BlockingConnection
+        pika.exceptions = types.SimpleNamespace(AMQPConnectionError=Exception)
+        sys.modules["pika"] = pika
+
+    if importlib.util.find_spec("httpx") is None:
+        httpx = types.ModuleType("httpx")
+        httpx.HTTPError = Exception
+        httpx.TransportError = Exception
+        sys.modules["httpx"] = httpx
+
+    if importlib.util.find_spec("motor") is None:
+        motor = types.ModuleType("motor")
+        motor_asyncio = types.ModuleType("motor.motor_asyncio")
+
+        class AsyncIOMotorClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def __getitem__(self, key):
+                return self
+
+            def __getattr__(self, name):
+                return self
+
+            async def find_one(self, *args, **kwargs):
+                return None
+
+        motor_asyncio.AsyncIOMotorClient = AsyncIOMotorClient
+        motor.motor_asyncio = motor_asyncio
+        sys.modules["motor"] = motor
+        sys.modules["motor.motor_asyncio"] = motor_asyncio
+
+
 class RosConsumerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.database = tempfile.NamedTemporaryFile(delete=False)
         cls.database.close()
         os.environ["DEDUP_DB_PATH"] = cls.database.name
+        install_missing_dependency_stubs()
         sys.modules.pop("consumer", None)
         cls.consumer = importlib.import_module("consumer")
 

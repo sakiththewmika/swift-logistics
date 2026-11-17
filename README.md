@@ -122,8 +122,8 @@ Wait ~30 seconds for MongoDB replica set initialization and Consul service regis
 ### Ready-to-Use Demo Credentials
 | Role | Portal URL | Username / Email | Password |
 |------|------------|------------------|----------|
-| **Client / Customer** | [http://localhost:3000](http://localhost:3000) | `john@example.com` | `password123` |
-| **Courier / Driver** | [http://localhost:3001](http://localhost:3001) | `driver1@swiftlogistics.com` | `password123` |
+| **Client / Customer** | [http://localhost:3000](http://localhost:3000) | `client@swift.lk` or `merchant@swift.lk` | `password123` |
+| **Courier / Driver** | [http://localhost:3001](http://localhost:3001) | `driver1@swift.lk` or `driver2@swift.lk` | `password123` |
 | **RabbitMQ Admin** | [http://localhost:15672](http://localhost:15672) | `guest` | `guest` |
 
 ### Infrastructure & Service Ports
