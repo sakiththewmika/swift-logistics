@@ -84,6 +84,9 @@ services:
     environment:
       MONGODB_URI: mongodb://mongo:27017/swift-logic?replicaSet=rs0
       RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: guest
+      RABBITMQ_PASSWORD: guest
       CONSUL_HOST: consul
       CONSUL_PORT: 8500
       SPRING_PROFILES_ACTIVE: docker
@@ -192,6 +195,9 @@ services:
         required: false
     environment:
       RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: guest
+      RABBITMQ_PASSWORD: guest
       MONGODB_URI: mongodb://mongo:27017/swift-logic?replicaSet=rs0
       CONSUL_HOST: consul
       CONSUL_PORT: 8500

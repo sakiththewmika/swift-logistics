@@ -33,7 +33,8 @@ public class DriverService {
      */
     public List<Order> getPendingOrdersForDriver(String driverId) {
         return orderRepository.findByStatusInAndDriverId(
-                Arrays.asList(OrderStatus.ASSIGNED, OrderStatus.ROUTED, OrderStatus.IN_TRANSIT, OrderStatus.DELIVERED), driverId);
+                Arrays.asList(OrderStatus.ASSIGNED, OrderStatus.ROUTED, OrderStatus.IN_TRANSIT,
+                        OrderStatus.DELIVERED, OrderStatus.FAILED), driverId);
     }
 
     /**

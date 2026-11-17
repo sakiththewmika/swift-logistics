@@ -272,6 +272,15 @@ async def process_message(channel, method_frame, properties, body):
     }
 
     if "[FAIL_ROUTE]" in str(order_data.get("deliveryAddress", "")):
+        traceparent = emit_zipkin_span(
+            "ros-integration",
+            "ros.route.failed",
+            inbound_headers,
+            correlation_id,
+            start_time_us,
+            (time.time_ns() // 1000) - start_time_us,
+            {"error": "true"},
+        )
         publish_route_result(
             channel,
             message_id,
@@ -279,6 +288,7 @@ async def process_message(channel, method_frame, properties, body):
             correlation_id,
             inbound_headers,
             status="FAILED",
+            traceparent=traceparent,
         )
         channel.basic_ack(delivery_tag=method_frame.delivery_tag)
         complete_dedup(dedup_key)
@@ -288,6 +298,15 @@ async def process_message(channel, method_frame, properties, body):
     try:
         route_data = await call_ros_with_fallback(ros_payload)
     except Exception as exc:
+        traceparent = emit_zipkin_span(
+            "ros-integration",
+            "ros.route.failed",
+            inbound_headers,
+            correlation_id,
+            start_time_us,
+            (time.time_ns() // 1000) - start_time_us,
+            {"error": "true"},
+        )
         publish_route_result(
             channel,
             message_id,
@@ -295,6 +314,7 @@ async def process_message(channel, method_frame, properties, body):
             correlation_id,
             inbound_headers,
             status="FAILED",
+            traceparent=traceparent,
         )
         channel.basic_ack(delivery_tag=method_frame.delivery_tag)
         complete_dedup(dedup_key)
@@ -346,9 +366,10 @@ async def process_message(channel, method_frame, properties, body):
 
 
 def publish_route_result(channel, message_id, order_id, correlation_id, inbound_headers, status,
-                         waypoints=None, driver_id=None, vehicle_id=None):
+                         waypoints=None, driver_id=None, vehicle_id=None, traceparent=None):
     headers = {
         **inbound_headers,
+        **({"traceparent": traceparent} if traceparent else {}),
         **({"X-Correlation-Id": correlation_id} if correlation_id else {}),
     }
     channel.basic_publish(
