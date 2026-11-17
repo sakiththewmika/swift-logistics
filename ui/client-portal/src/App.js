@@ -96,7 +96,7 @@ const ClientPortal = () => {
   const { customer, isAuthenticated, getCustomerId, signout } = useAuth();
   const [orders, setOrders] = useState([]);
   const [selectedOrder, setSelectedOrder] = useState(null);
-  const [notifications] = useState([
+  const [notifications, setNotifications] = useState([
     { id: 1, message: 'Order ORD-COL-1001 is out for delivery in Colombo', time: '10m ago', read: false },
     { id: 2, message: 'Order ORD-COL-1002 has completed proof of delivery', time: '1h ago', read: true },
   ]);
@@ -114,6 +114,13 @@ const ClientPortal = () => {
   const addToast = useCallback((toast) => {
     const id = Date.now() + Math.random().toString(36).substring(2, 7);
     setToasts((prev) => [...prev, { id, ...toast }]);
+  }, []);
+
+  const addNotification = useCallback((message) => {
+    setNotifications((prev) => [
+      { id: Date.now(), message, time: 'Just now', read: false },
+      ...prev,
+    ]);
   }, []);
 
   const removeToast = useCallback((id) => {
@@ -143,6 +150,7 @@ const ClientPortal = () => {
             message: `Status transitioned: ${prevStatus} → ${order.status}`,
             type: isFail ? 'error' : isDelivered ? 'success' : 'info',
           });
+          addNotification(`Order ${order.orderId} status changed to ${order.status}`);
         }
         prevOrderStatusesRef.current[order.orderId] = order.status;
       });
@@ -165,12 +173,16 @@ const ClientPortal = () => {
     } finally {
       setIsRefreshing(false);
     }
-  }, [getCustomerId, addToast]);
+  }, [getCustomerId, addNotification, addToast]);
 
   // Initial load
   useEffect(() => {
     if (isAuthenticated) {
       fetchOrders();
+    } else {
+      setOrders([]);
+      setSelectedOrder(null);
+      prevOrderStatusesRef.current = {};
     }
   }, [isAuthenticated, fetchOrders]);
 
@@ -215,6 +227,7 @@ const ClientPortal = () => {
         message: `Order ${createdOrder.orderId} submitted to Saga orchestration.`,
         type: 'success',
       });
+      addNotification(`Order ${createdOrder.orderId} was created`);
     } catch (err) {
       addToast({
         title: 'Order Submission Failed',
@@ -318,16 +331,25 @@ const ClientPortal = () => {
           </div>
 
           <div className="header-actions">
-            <NotificationBell
-              unreadCount={unreadCount}
-              onClick={() => setShowNotifications(!showNotifications)}
-            />
-            {showNotifications && (
-              <NotificationList
-                notifications={notifications}
-                onClose={() => setShowNotifications(false)}
+            <div style={{ position: 'relative' }}>
+              <NotificationBell
+                unreadCount={unreadCount}
+                onClick={() => setShowNotifications(!showNotifications)}
               />
-            )}
+              {showNotifications && (
+                <NotificationList
+                  notifications={notifications}
+                  onClose={() => setShowNotifications(false)}
+                  onMarkAllRead={() => setNotifications((prev) => prev.map((n) => ({ ...n, read: true })))}
+                  onSelectNotification={(notification) => {
+                    setNotifications((prev) => prev.map((n) =>
+                      n.id === notification.id ? { ...n, read: true } : n
+                    ));
+                    setShowNotifications(false);
+                  }}
+                />
+              )}
+            </div>
             {isAuthenticated ? (
               <>
                 <UserProfile
@@ -473,6 +495,7 @@ const ClientPortal = () => {
               getStatusColor={getStatusColor}
               getStatusIcon={getStatusIcon}
               formatStatus={formatStatus}
+              onOrderUpdated={fetchOrders}
             />
           </div>
 

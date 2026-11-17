@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { orderEndpoints } from '../network/order';
 
-const OrderDetails = ({ order, getStatusColor, getStatusIcon, formatStatus }) => {
+const OrderDetails = ({ order, getStatusColor, getStatusIcon, formatStatus, onOrderUpdated }) => {
   const [events, setEvents] = useState([]);
   const [eventsLoading, setEventsLoading] = useState(false);
   const [currentStatus, setCurrentStatus] = useState(order?.status || 'NEW');
@@ -78,6 +78,7 @@ const OrderDetails = ({ order, getStatusColor, getStatusIcon, formatStatus }) =>
           }
           if (update.status) {
             setCurrentStatus(update.status);
+            onOrderUpdated?.();
           }
         }
         loadEvents();
@@ -102,7 +103,7 @@ const OrderDetails = ({ order, getStatusColor, getStatusIcon, formatStatus }) =>
         sseSource.close();
       }
     };
-  }, [order?.orderId]);
+  }, [onOrderUpdated, order?.orderId]);
 
   if (!order) {
     return (
