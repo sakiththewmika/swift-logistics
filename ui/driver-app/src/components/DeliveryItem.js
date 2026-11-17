@@ -8,10 +8,17 @@ const DeliveryItem = ({ delivery, onStart, onComplete, onProof }) => {
   const items = Array.isArray(delivery.items) ? delivery.items : [];
   const getStatusClass = (status) => {
     switch (status) {
-      case 'ASSIGNED': return 'status-badge assigned';
+      case 'ASSIGNED':
+      case 'ROUTED':
+      case 'READY':
+        return 'status-badge assigned';
       case 'IN_TRANSIT': return 'status-badge in-transit';
-      case 'COMPLETED': return 'status-badge completed';
-      case 'FAILED': return 'status-badge failed';
+      case 'COMPLETED':
+      case 'DELIVERED':
+        return 'status-badge completed';
+      case 'FAILED':
+      case 'CANCELLED_REFUNDED':
+        return 'status-badge failed';
       default: return 'status-badge';
     }
   };

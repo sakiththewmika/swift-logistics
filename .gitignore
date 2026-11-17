@@ -1,7 +1,7 @@
-.idea
+.idea/
 *.zsh
 *.ssh
-.DS_store
+.DS_Store
 
 .venv
 services/wms-adapter/.env

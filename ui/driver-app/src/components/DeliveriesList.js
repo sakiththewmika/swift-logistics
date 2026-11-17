@@ -16,7 +16,7 @@ const DeliveriesList = ({ deliveries, onStart, onComplete, onRefresh, onProof })
     <div>
       {deliveries.map((delivery) => (
         <DeliveryItem
-          key={delivery.id}
+          key={delivery.id ?? delivery.orderId}
           delivery={delivery}
           onStart={onStart}
           onComplete={onComplete}
