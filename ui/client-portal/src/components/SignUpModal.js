@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { authEndpoints } from "../network/auth";
+import { useAuth } from '../context/AuthContext';
 
 const SignUpModal = ({ onClose }) => {
+  const { signup } = useAuth();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -13,7 +14,7 @@ const SignUpModal = ({ onClose }) => {
     setError('');
     setLoading(true);
     try {
-      await authEndpoints.signup({ name, email, password });
+      await signup(name, email, password);
       onClose();
     } catch (err) {
       setError(err?.message || 'Failed to sign up');

@@ -6,22 +6,20 @@ export const authEndpoints = {
   },
 
   async signup(data) {
-    // Mock signup: no network call, accept name, email, password and create a customer object
-    const { name, email, password } = data;
-    if (!name?.trim() || !email?.trim() || !password) {
+    const { customerName, customerEmail, password } = data;
+    if (!customerName?.trim() || !customerEmail?.trim() || !password) {
       throw new Error('All fields are required');
     }
-    if (!/\S+@\S+\.\S+/.test(email)) {
+    if (!/\S+@\S+\.\S+/.test(customerEmail)) {
       throw new Error('Invalid email');
     }
     if (password.length < 6) {
       throw new Error('Password must be at least 6 characters');
     }
-    const cust = {
-      customerName: name.trim(),
-      customerEmail: email.trim(),
-      password: password,
-    };
-    return NETWORK.post('/auth/sign-up', cust);
+    return NETWORK.post('/auth/sign-up', {
+      customerName: customerName.trim(),
+      customerEmail: customerEmail.trim(),
+      password,
+    });
   }
 }

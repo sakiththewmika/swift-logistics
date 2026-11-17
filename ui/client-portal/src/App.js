@@ -93,7 +93,7 @@ const formatStatus = (status) => {
 };
 
 const ClientPortal = () => {
-  const { customer, isAuthenticated, getCustomerId } = useAuth();
+  const { customer, isAuthenticated, getCustomerId, signout } = useAuth();
   const [orders, setOrders] = useState([]);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [notifications] = useState([
@@ -334,6 +334,7 @@ const ClientPortal = () => {
                   user={{
                     name: customer?.customerName || customer?.customerEmail || 'Demo Client',
                   }}
+                  onLogout={signout}
                 />
                 <button
                   className="create-order-btn"

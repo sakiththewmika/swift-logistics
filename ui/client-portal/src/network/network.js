@@ -32,7 +32,22 @@ class Network {
       options.body = typeof data === 'string' ? data : JSON.stringify(data);
     }
     console.log(`Request: ${options.method} ${url}`, data || '');
-    const res = await fetch(url, options);
+    let res;
+    try {
+      res = await fetch(url, options);
+    } catch (networkErr) {
+      if (url.includes(':8080')) {
+        const fallbackUrl = url.replace(':8080', ':8000');
+        console.warn(`Fetch to ${url} failed; trying fallback ${fallbackUrl}`);
+        res = await fetch(fallbackUrl, options);
+      } else if (url.includes(':8000')) {
+        const fallbackUrl = url.replace(':8000', ':8080');
+        console.warn(`Fetch to ${url} failed; trying fallback ${fallbackUrl}`);
+        res = await fetch(fallbackUrl, options);
+      } else {
+        throw networkErr;
+      }
+    }
     const text = await res.text();
     let json = null;
     try { json = text ? JSON.parse(text) : null; } catch { /* non-JSON */ }
@@ -53,7 +68,7 @@ class Network {
   delete(endpoint, data, headers) { return this.request('DELETE', endpoint, data, headers); }
 }
 
-const BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000/api/v1';
+const BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8080/api/v1';
 const PORT = undefined;
 
 const NETWORK = new Network(BASE_URL, PORT);

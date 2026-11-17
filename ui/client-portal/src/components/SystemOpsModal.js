@@ -17,7 +17,8 @@ import {
 } from 'lucide-react';
 import { orderEndpoints } from '../network/order';
 
-const SystemOpsModal = ({ onClose, onOrderCreated, customerId = 'CUST-001' }) => {
+const SystemOpsModal = ({ onClose, onOrderCreated, customerId = 'cust-001' }) => {
+  const activeCustomerId = customerId || 'cust-001';
   const [activeTab, setActiveTab] = useState('scenarios'); // 'scenarios' | 'dlq' | 'infra'
   
   // Health status state
@@ -25,7 +26,7 @@ const SystemOpsModal = ({ onClose, onOrderCreated, customerId = 'CUST-001' }) =>
   const [healthLoading, setHealthLoading] = useState(false);
 
   // DLQ Replay state
-  const [selectedQueue, setSelectedQueue] = useState('order.dlq');
+  const [selectedQueue, setSelectedQueue] = useState('order-created.dlq');
   const [replayLimit, setReplayLimit] = useState(10);
   const [replayLoading, setReplayLoading] = useState(false);
   const [replayResult, setReplayResult] = useState(null);
@@ -37,6 +38,8 @@ const SystemOpsModal = ({ onClose, onOrderCreated, customerId = 'CUST-001' }) =>
   // Scenario 2: Idempotency duplicate test state
   const [idempotencyLoading, setIdempotencyLoading] = useState(false);
   const [idempotencyResult, setIdempotencyResult] = useState(null);
+  const [rollbackLoading, setRollbackLoading] = useState(false);
+  const [rollbackResult, setRollbackResult] = useState(null);
 
   // Fetch health check on mount
   useEffect(() => {
@@ -85,10 +88,12 @@ const SystemOpsModal = ({ onClose, onOrderCreated, customerId = 'CUST-001' }) =>
     setHappyPathResult(null);
     const idempotencyKey = `idem-express-${Date.now()}`;
     const payload = {
-      customerId: customerId || 'CUST-001',
+      customerId: activeCustomerId,
       pickupAddress: 'Peliyagoda Fulfilment Hub, Colombo',
       deliveryAddress: '42 Galle Road, Colombo 03',
-      destinationCity: 'Colombo',
+      city: 'Colombo',
+      postalCode: '00300',
+      country: 'Sri Lanka',
       priority: 'HIGH',
       items: [
         { name: 'Dell UltraSharp 27" 4K Monitor', quantity: 1, price: 95000.0, weight: 6.5 },
@@ -128,10 +133,12 @@ const SystemOpsModal = ({ onClose, onOrderCreated, customerId = 'CUST-001' }) =>
     setIdempotencyResult(null);
     const duplicateKey = `idem-dup-test-${Date.now()}`;
     const payload = {
-      customerId: customerId || 'CUST-001',
+      customerId: activeCustomerId,
       pickupAddress: 'Peliyagoda Fulfilment Hub, Colombo',
       deliveryAddress: '15 Bauddhaloka Mawatha, Colombo 04',
-      destinationCity: 'Colombo',
+      city: 'Colombo',
+      postalCode: '00300',
+      country: 'Sri Lanka',
       priority: 'MEDIUM',
       items: [{ name: 'Logitech MX Master 3S', quantity: 1, price: 28000.0, weight: 0.4 }],
       totalAmount: 28000.0,
@@ -182,6 +189,45 @@ const SystemOpsModal = ({ onClose, onOrderCreated, customerId = 'CUST-001' }) =>
       });
     } finally {
       setIdempotencyLoading(false);
+    }
+  };
+
+  const handleRunRollbackTest = async () => {
+    setRollbackLoading(true);
+    setRollbackResult(null);
+    const idempotencyKey = `idem-rollback-${Date.now()}`;
+    const payload = {
+      customerId: activeCustomerId,
+      pickupAddress: 'Peliyagoda Fulfilment Hub, Colombo',
+      deliveryAddress: '99 Galle Road, Colombo 03 [FAIL_ROUTE]',
+      city: 'Colombo',
+      postalCode: '00300',
+      country: 'Sri Lanka',
+      priority: 'HIGH',
+      items: [{ name: 'Saga rollback test parcel', quantity: 1, price: 45000.0, weight: 2.0 }],
+      totalAmount: 45000.0,
+    };
+
+    try {
+      const order = await orderEndpoints.createOrder(payload, {
+        'Idempotency-Key': idempotencyKey,
+      });
+      setRollbackResult({
+        success: true,
+        orderId: order?.orderId,
+        status: order?.status || 'NEW',
+        idempotencyKey,
+        timestamp: new Date().toLocaleTimeString(),
+      });
+      onOrderCreated?.(order);
+    } catch (err) {
+      setRollbackResult({
+        success: false,
+        error: err.message || 'Failed to create rollback test order',
+        timestamp: new Date().toLocaleTimeString(),
+      });
+    } finally {
+      setRollbackLoading(false);
     }
   };
 
@@ -536,6 +582,78 @@ const SystemOpsModal = ({ onClose, onOrderCreated, customerId = 'CUST-001' }) =>
                     <div style={{ marginTop: 6, fontSize: 11, color: '#64748b' }}>
                       Shared Key: <code>{idempotencyResult.duplicateKey}</code> | Timestamp: {idempotencyResult.timestamp}
                     </div>
+
+                  </div>
+                )}
+              </div>
+
+              {/* Scenario 3: Saga Compensation and Rollback */}
+              <div
+                style={{
+                  border: '1px solid #fecaca',
+                  borderRadius: 8,
+                  padding: 16,
+                  marginTop: 16,
+                  backgroundColor: '#fffafa',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#991b1b' }}>
+                      Scenario C: Saga Compensation &amp; Rollback Test
+                    </h3>
+                    <p style={{ margin: '4px 0 0 0', fontSize: 12, color: '#64748b' }}>
+                      Forces a ROS route failure after billing and warehouse processing, then verifies
+                      COMPENSATING_WAREHOUSE → COMPENSATING_BILLING → CANCELLED_REFUNDED.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRunRollbackTest}
+                    disabled={rollbackLoading}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      backgroundColor: '#dc2626',
+                      color: '#ffffff',
+                      border: 'none',
+                      padding: '8px 14px',
+                      borderRadius: 6,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: rollbackLoading ? 'not-allowed' : 'pointer',
+                      opacity: rollbackLoading ? 0.7 : 1,
+                    }}
+                  >
+                    <AlertCircle size={14} />
+                    {rollbackLoading ? 'Testing Rollback...' : 'Run Rollback Test'}
+                  </button>
+                </div>
+
+                {rollbackResult && (
+                  <div
+                    style={{
+                      marginTop: 12,
+                      padding: 12,
+                      backgroundColor: rollbackResult.success ? '#fef2f2' : '#fff7ed',
+                      border: `1px solid ${rollbackResult.success ? '#fecaca' : '#fed7aa'}`,
+                      borderRadius: 6,
+                      fontSize: 12,
+                      color: '#7f1d1d',
+                    }}
+                  >
+                    {rollbackResult.success ? (
+                      <>
+                        <strong>Rollback order created:</strong>{' '}
+                        <code>{rollbackResult.orderId}</code> ({rollbackResult.status})
+                        <div style={{ marginTop: 4, color: '#64748b', fontSize: 11 }}>
+                          Key: <code>{rollbackResult.idempotencyKey}</code> | Timestamp: {rollbackResult.timestamp}
+                        </div>
+                      </>
+                    ) : (
+                      <><strong>Error:</strong> {rollbackResult.error}</>
+                    )}
                   </div>
                 )}
               </div>
@@ -586,9 +704,14 @@ const SystemOpsModal = ({ onClose, onOrderCreated, customerId = 'CUST-001' }) =>
                         backgroundColor: '#ffffff',
                       }}
                     >
-                      <option value="order.dlq">order.dlq (Saga Orchestration DLQ)</option>
-                      <option value="warehouse.dlq">warehouse.dlq (WMS TCP Socket DLQ)</option>
-                      <option value="route.dlq">route.dlq (ROS Optimization DLQ)</option>
+                      <option value="order-created.dlq">order-created.dlq</option>
+                      <option value="billing-updates.dlq">billing-updates.dlq</option>
+                      <option value="billing-compensation.dlq">billing-compensation.dlq</option>
+                      <option value="warehouse-queue.dlq">warehouse-queue.dlq</option>
+                      <option value="warehouse-updates.dlq">warehouse-updates.dlq</option>
+                      <option value="warehouse-compensation.dlq">warehouse-compensation.dlq</option>
+                      <option value="route-planning.dlq">route-planning.dlq</option>
+                      <option value="route-updates.dlq">route-updates.dlq</option>
                     </select>
                   </div>
 

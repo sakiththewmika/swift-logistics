@@ -33,7 +33,7 @@ export const orderEndpoints = {
   },
 
   trackOrder(orderId, onMessage, onLocation) {
-    const baseUrl = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000/api/v1';
+    const baseUrl = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8080/api/v1';
     const sseHost = baseUrl.replace(/\/api\/v1\/?$/, '');
     const url = `${sseHost}/sse/order/${orderId}`;
 

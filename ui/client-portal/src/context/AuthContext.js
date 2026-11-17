@@ -32,6 +32,20 @@ export const AuthProvider = ({ children }) => {
     return cust;
   }, []);
 
+  const signup = useCallback(async (customerName, customerEmail, password) => {
+    const res = await authEndpoints.signup({ customerName, customerEmail, password });
+    const cust = res?.customer ?? res ?? null;
+    setCustomer(cust);
+    if (cust) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(cust));
+      } catch (e) {
+        console.error('Failed to save customer to localStorage', e);
+      }
+    }
+    return cust;
+  }, []);
+
   const signout = useCallback(() => {
     try {
       localStorage.removeItem(STORAGE_KEY);
@@ -47,9 +61,10 @@ export const AuthProvider = ({ children }) => {
     customer,
     isAuthenticated: !!customer,
     signin,
+    signup,
     signout,
     getCustomerId,
-  }), [customer, signin, signout, getCustomerId]);
+  }), [customer, signin, signup, signout, getCustomerId]);
 
   return (
     <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
