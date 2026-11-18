@@ -5,6 +5,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
+import org.springframework.boot.autoconfigure.amqp.SimpleRabbitListenerContainerFactoryConfigurer;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.core.AcknowledgeMode;
 import org.springframework.amqp.rabbit.listener.RabbitListenerEndpointRegistry;
@@ -24,11 +25,15 @@ public class CmsCircuitBreakerConfig {
 
     @Bean
     public SimpleRabbitListenerContainerFactory manualAckRabbitListenerContainerFactory(
+            SimpleRabbitListenerContainerFactoryConfigurer configurer,
             ConnectionFactory connectionFactory,
             Jackson2JsonMessageConverter messageConverter) {
         SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
-        factory.setConnectionFactory(connectionFactory);
+        // Apply spring.rabbitmq.listener.simple.* (observation, requeue policy, ...) that a hand-built factory would skip.
+        configurer.configure(factory, connectionFactory);
         factory.setAcknowledgeMode(AcknowledgeMode.MANUAL);
+        // A message that fails for good must be dead-lettered, not redelivered in an endless loop.
+        factory.setDefaultRequeueRejected(false);
         factory.setPrefetchCount(1);
         factory.setMessageConverter(messageConverter);
         return factory;

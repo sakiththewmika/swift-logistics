@@ -19,6 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import org.springframework.retry.annotation.Backoff;
+import org.springframework.retry.annotation.Recover;
 import org.springframework.retry.annotation.Retryable;
 import org.springframework.ws.client.WebServiceIOException;
 import com.rabbitmq.client.Channel;
@@ -66,11 +67,34 @@ public class OrderConsumer {
         }
         log.info(" Received Order from Orchestrator: {}", orderMessage);
         try {
-            SubmitOrderResponse response = cmsSoapClient.submitOrder(
-                    orderMessage.getOrderId(),
-                    orderMessage.getCustomerId(),
-                    orderMessage.getTotalAmount()
-            );
+            SubmitOrderResponse response;
+            try {
+                response = cmsSoapClient.submitOrder(
+                        orderMessage.getOrderId(),
+                        orderMessage.getCustomerId(),
+                        orderMessage.getTotalAmount()
+                );
+            } catch (CallNotPermittedException exception) {
+                // Circuit open: not a verdict on this order. Put it back; consumption is paused until the circuit closes.
+                idempotentConsumerFilter.releaseLockOnFailure(dedupKey);
+                log.warn("CMS circuit is OPEN; requeuing order {}", orderMessage.getOrderId());
+                try {
+                    channel.basicNack(message.getMessageProperties().getDeliveryTag(), false, true);
+                } catch (java.io.IOException nackException) {
+                    throw new IllegalStateException("Unable to requeue CMS order message", nackException);
+                }
+                return;
+            } catch (WebServiceIOException exception) {
+                // Transient transport failure: let @Retryable try again (the lock is released by the outer
+                // handler); consumeOrderFailed() runs once the attempts are exhausted.
+                throw exception;
+            } catch (RuntimeException exception) {
+                // Permanent failure (SOAP fault, unreadable response, ...): retrying cannot help, so fail the billing step.
+                idempotentConsumerFilter.releaseLockOnFailure(dedupKey);
+                log.error("CMS billing failed permanently for order {}", orderMessage.getOrderId(), exception);
+                reportBillingFailureAndAck(orderMessage, channel, message);
+                return;
+            }
 
             BillingUpdateMessage billingUpdate = BillingUpdateMessage.builder()
                     .orderId(response.getOrderId())
@@ -80,14 +104,6 @@ public class OrderConsumer {
                     .build();
             billingUpdatePublisher.publishAck(billingUpdate);
             channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
-        } catch (CallNotPermittedException exception) {
-            idempotentConsumerFilter.releaseLockOnFailure(dedupKey);
-            log.warn("CMS circuit is OPEN; requeuing order {}", orderMessage.getOrderId());
-            try {
-                channel.basicNack(message.getMessageProperties().getDeliveryTag(), false, true);
-            } catch (java.io.IOException nackException) {
-                throw new IllegalStateException("Unable to requeue CMS order message", nackException);
-            }
         } catch (java.io.IOException exception) {
             idempotentConsumerFilter.releaseLockOnFailure(dedupKey);
             throw new IllegalStateException("Unable to acknowledge CMS order message", exception);
@@ -96,6 +112,35 @@ public class OrderConsumer {
             throw exception;
         } finally {
             CorrelationIdContext.clear();
+        }
+    }
+
+    /**
+     * Runs when every @Retryable attempt of {@link #consumeOrder} failed on transport errors. The order
+     * must not stay in NEW forever, so the billing step is reported as FAILED and the message acknowledged.
+     */
+    @Recover
+    public void consumeOrderFailed(WebServiceIOException exception, OrderMessage orderMessage, Channel channel,
+                                   Message message, String correlationId, String traceparent) {
+        CorrelationIdContext.setFromHeaders(correlationId, traceparent);
+        try {
+            log.error("CMS unreachable after retries; failing billing for order {}", orderMessage.getOrderId(), exception);
+            reportBillingFailureAndAck(orderMessage, channel, message);
+        } finally {
+            CorrelationIdContext.clear();
+        }
+    }
+
+    private void reportBillingFailureAndAck(OrderMessage orderMessage, Channel channel, Message message) {
+        billingUpdatePublisher.publishAck(BillingUpdateMessage.builder()
+                .orderId(orderMessage.getOrderId())
+                .status("FAILED")
+                .timestamp(LocalDateTime.now())
+                .build());
+        try {
+            channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);
+        } catch (java.io.IOException exception) {
+            throw new IllegalStateException("Unable to acknowledge failed CMS order message", exception);
         }
     }
 
