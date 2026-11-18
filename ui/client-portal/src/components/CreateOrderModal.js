@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import useModalA11y from '../hooks/useModalA11y';
 
 const initialState = () => ({
   deliveryAddress: '',
@@ -11,6 +12,7 @@ const initialState = () => ({
 const CreateOrderModal = ({ onClose, onCreate }) => {
   const [form, setForm] = useState(initialState());
   const [submitting, setSubmitting] = useState(false);
+  const dialogRef = useModalA11y(onClose, { enabled: !submitting });
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -66,8 +68,15 @@ const CreateOrderModal = ({ onClose, onCreate }) => {
 
   return (
     <div className="modal-overlay">
-      <div className="modal">
-        <h2 style={{ marginTop: 0, marginBottom: 18, fontWeight: 600, fontSize: 22, color: '#1e293b' }}>Create New
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="create-order-title"
+        ref={dialogRef}
+        tabIndex={-1}
+      >
+        <h2 id="create-order-title" style={{ marginTop: 0, marginBottom: 18, fontWeight: 600, fontSize: 22, color: '#1e293b' }}>Create New
           Order</h2>
         <form className="create-order-form" onSubmit={handleSubmit}>
           <div>

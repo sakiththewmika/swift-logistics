@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import SystemOpsModal from './SystemOpsModal';
 import { orderEndpoints } from '../network/order';
@@ -82,5 +82,17 @@ describe('SystemOpsModal under JWT enforcement', () => {
 
     expect(await screen.findByText(/Could not sign in as the demo customer: Invalid credentials/)).toBeInTheDocument();
     expect(orderEndpoints.createOrder).not.toHaveBeenCalled();
+  });
+
+  test('is a labelled modal dialog that Escape closes', () => {
+    signedIn('cust-1');
+    const onClose = jest.fn();
+    render(<SystemOpsModal onClose={onClose} onOrderCreated={jest.fn()} />);
+
+    const dialog = screen.getByRole('dialog', { name: /Chaos Recovery Console/ });
+    expect(dialog).toHaveAttribute('aria-modal', 'true');
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

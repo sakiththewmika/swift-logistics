@@ -118,6 +118,7 @@ const OrderDetailsContent = ({ order, getStatusColor, getStatusIcon, formatStatu
   if (!order) {
     return (
       <div
+        className="order-panel"
         style={{
           backgroundColor: '#ffffff',
           borderRadius: 10,
@@ -125,8 +126,6 @@ const OrderDetailsContent = ({ order, getStatusColor, getStatusIcon, formatStatu
           padding: 48,
           textAlign: 'center',
           color: '#94a3b8',
-          height: 'calc(100vh - 220px)',
-          minHeight: 680,
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
@@ -166,14 +165,12 @@ const OrderDetailsContent = ({ order, getStatusColor, getStatusIcon, formatStatu
 
   return (
     <div
-      className="order-details"
+      className="order-details order-panel"
       key={order.orderId}
       style={{
         margin: 0,
         borderRadius: 10,
         border: '1px solid #e2e8f0',
-        height: 'calc(100vh - 220px)',
-        minHeight: 680,
         overflowY: 'auto',
         padding: 20,
         boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.05)',

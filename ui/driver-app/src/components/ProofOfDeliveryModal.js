@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Camera, Image as ImageIcon, RotateCcw, CheckCircle2, AlertTriangle, X } from 'lucide-react';
+import useModalA11y from '../hooks/useModalA11y';
 import '../AppStyles.css';
 
 const ProofOfDeliveryModal = ({ delivery, initialMode = 'DELIVERED', onSubmit, onCancel }) => {
@@ -13,6 +14,7 @@ const ProofOfDeliveryModal = ({ delivery, initialMode = 'DELIVERED', onSubmit, o
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
+  const dialogRef = useModalA11y(onCancel, { enabled: !submitting });
   const canvasRef = useRef(null);
   // Latest captured signature, readable from effects without re-running them on every stroke.
   const signatureRef = useRef('');
@@ -246,10 +248,18 @@ const ProofOfDeliveryModal = ({ delivery, initialMode = 'DELIVERED', onSubmit, o
 
   return (
     <div className="modal">
-      <div className="modal-content" style={{ maxWidth: 460, maxHeight: '92vh', overflowY: 'auto' }}>
+      <div
+        className="modal-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="pod-title"
+        ref={dialogRef}
+        tabIndex={-1}
+        style={{ maxWidth: 460, maxHeight: '92vh', overflowY: 'auto' }}
+      >
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
           <div>
-            <h3 className="modal-title" style={{ margin: 0 }}>Proof of Delivery (POD)</h3>
+            <h3 id="pod-title" className="modal-title" style={{ margin: 0 }}>Proof of Delivery (POD)</h3>
             <p style={{ margin: '4px 0 0', fontSize: 13, color: '#64748b' }}>
               Order: <strong>{orderDisplayId}</strong> • {delivery.city || 'Colombo'}
             </p>
@@ -259,6 +269,7 @@ const ProofOfDeliveryModal = ({ delivery, initialMode = 'DELIVERED', onSubmit, o
             disabled={submitting}
             style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}
             title="Close"
+            aria-label="Close"
           >
             <X size={20} />
           </button>

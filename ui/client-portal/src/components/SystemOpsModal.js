@@ -16,11 +16,13 @@ import {
 } from 'lucide-react';
 import { orderEndpoints } from '../network/order';
 import { useAuth } from '../context/AuthContext';
+import useModalA11y from '../hooks/useModalA11y';
 
 const DEMO_CUSTOMER = { username: 'client@swift.lk', password: 'password123' };
 
 const SystemOpsModal = ({ onClose, onOrderCreated }) => {
   const { isAuthenticated, signin, getCustomerId } = useAuth();
+  const dialogRef = useModalA11y(onClose);
   const [activeTab, setActiveTab] = useState('scenarios'); // 'scenarios' | 'dlq' | 'infra'
   
   // Health status state
@@ -304,6 +306,11 @@ const SystemOpsModal = ({ onClose, onOrderCreated }) => {
           border: '1px solid #cbd5e1',
         }}
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="system-ops-title"
+        ref={dialogRef}
+        tabIndex={-1}
       >
         {/* Header */}
         <div
@@ -333,7 +340,7 @@ const SystemOpsModal = ({ onClose, onOrderCreated }) => {
               <Activity size={20} color="#38bdf8" />
             </div>
             <div>
-              <h2 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: '#f8fafc' }}>
+              <h2 id="system-ops-title" style={{ margin: 0, fontSize: 17, fontWeight: 600, color: '#f8fafc' }}>
                 Middleware Architecture & Chaos Recovery Console
               </h2>
               <span style={{ fontSize: 12, color: '#94a3b8' }}>

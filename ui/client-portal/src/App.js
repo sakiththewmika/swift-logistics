@@ -353,6 +353,7 @@ const ClientPortal = () => {
             <div style={{ position: 'relative' }}>
               <NotificationBell
                 unreadCount={unreadCount}
+                expanded={showNotifications}
                 onClick={() => setShowNotifications(!showNotifications)}
               />
               {showNotifications && (
@@ -504,7 +505,7 @@ const ClientPortal = () => {
         </div>
 
         {/* Master-Detail Split-Screen Workspace */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(340px, 380px) 1fr', gap: 20 }}>
+        <div className="workspace-grid">
           {/* Left Column: Master List */}
           <div>
             <OrderList

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import useModalA11y from '../hooks/useModalA11y';
 
 const SignUpModal = ({ onClose }) => {
   const { signup } = useAuth();
@@ -8,6 +9,7 @@ const SignUpModal = ({ onClose }) => {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const dialogRef = useModalA11y(onClose, { enabled: !loading });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -25,8 +27,15 @@ const SignUpModal = ({ onClose }) => {
 
   return (
     <div className="modal-overlay">
-      <div className="modal">
-        <h2 style={{marginTop:0,marginBottom:18,fontWeight:600,fontSize:22,color:'#1e293b'}}>Sign Up</h2>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="signup-title"
+        ref={dialogRef}
+        tabIndex={-1}
+      >
+        <h2 id="signup-title" style={{marginTop:0,marginBottom:18,fontWeight:600,fontSize:22,color:'#1e293b'}}>Sign Up</h2>
         <form onSubmit={handleSubmit} className="create-order-form">
           <label>
             Name

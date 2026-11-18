@@ -168,4 +168,26 @@ describe('ProofOfDeliveryModal', () => {
     expect(screen.getByRole('button', { name: /Report Delivery Failed/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Confirm Delivery/ })).not.toBeInTheDocument();
   });
+
+  test('is a labelled modal dialog that Escape dismisses, except while submitting', async () => {
+    const onCancel = jest.fn();
+    let finish;
+    const onSubmit = jest.fn(() => new Promise((resolve) => { finish = resolve; }));
+    render(<ProofOfDeliveryModal delivery={delivery('o-1')} onSubmit={onSubmit} onCancel={onCancel} />);
+
+    const dialog = screen.getByRole('dialog', { name: 'Proof of Delivery (POD)' });
+    expect(dialog).toHaveAttribute('aria-modal', 'true');
+    expect(dialog).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
+
+    signature();
+    userEvent.click(confirmButton());
+    await screen.findByRole('button', { name: 'Submitting...' });
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onCancel).not.toHaveBeenCalled();
+
+    await act(async () => finish());
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
 });

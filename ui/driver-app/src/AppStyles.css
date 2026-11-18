@@ -432,3 +432,65 @@ body, .container {
 }
 
 
+
+/* ------------------------------------------------------------------ */
+/* Keyboard focus                                                      */
+/* ------------------------------------------------------------------ */
+button:focus-visible,
+[role="button"]:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+input:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+[role="dialog"]:focus {
+  outline: none; /* the dialog container is focused programmatically; its controls show their own rings */
+}
+
+/* ------------------------------------------------------------------ */
+/* Tablet and below                                                    */
+/* ------------------------------------------------------------------ */
+@media (max-width: 1024px) {
+  .header-content {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .delivery-item-header,
+  .card-header,
+  .info-row {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Phones                                                              */
+/* ------------------------------------------------------------------ */
+@media (max-width: 480px) {
+  .header {
+    padding: 12px;
+  }
+
+  .modal {
+    padding: 8px;
+  }
+
+  .modal-content {
+    padding: 16px;
+  }
+
+  .delivery-actions {
+    flex-wrap: wrap;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition: none !important;
+  }
+}
