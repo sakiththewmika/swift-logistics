@@ -1,8 +1,22 @@
+# IDE / OS
 .idea/
+.vscode/
+.DS_Store
 *.zsh
 *.ssh
-.DS_Store
 
+# Python
 .venv
-services/wms-adapter/.env
+venv/
+__pycache__/
+*.py[cod]
+
+# Local environment files (copy the matching .env.example to create them)
+.env
+!.env.example
+services/wms-adapter/app/.env
 services/ros-integration/.env
+ui/driver-app/.env
+
+# Generated output
+services/wms-adapter/output.txt

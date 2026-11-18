@@ -101,6 +101,13 @@ services:
       - swift-network
     volumes:
       - orchestrator_logs:/app/logs
+    healthcheck:
+      # Public liveness route; the alpine JRE image ships busybox wget but not curl.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8000/api/v1/orders/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
 
   # WMS adapter service
   wms-adapter:
@@ -129,6 +136,13 @@ services:
       - swift-network
     volumes:
       - wms_dedup_data:/app/data
+    healthcheck:
+      # python:slim has neither curl nor wget, so probe with the interpreter itself.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
     
     # ROS integration service
   ros-integration:
@@ -160,6 +174,12 @@ services:
       - swift-network
     volumes:
       - ros_dedup_data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8004/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
 
   cms:
     build:
@@ -212,15 +232,26 @@ services:
         condition: service_healthy
     networks:
       - swift-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8001/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
 
   client-portal:
     build:
       context: ../ui/client-portal
       dockerfile: Dockerfile
+      args:
+        REACT_APP_API_BASE_URL: ${REACT_APP_API_BASE_URL:-http://localhost:8080/api/v1}
     container_name: swift-client-portal
     restart: unless-stopped
     ports:
         - "3000:3000" # Application port
+    depends_on:
+      orchestrator:
+        condition: service_healthy
     networks:
       - swift-network
 
@@ -228,13 +259,16 @@ services:
     build:
       context: ../ui/driver-app
       dockerfile: Dockerfile
+      args:
+        REACT_APP_API_BASE_URL: ${REACT_APP_API_BASE_URL:-http://localhost:8080/api/v1}
+        REACT_APP_WS_URL: ${REACT_APP_WS_URL:-ws://localhost:8080/ws}
     container_name: swift-driver-app
     restart: unless-stopped
     ports:
       - "3001:3001" # Application port
-    environment:
-      REACT_APP_API_BASE_URL: http://localhost:8080/api/v1
-      REACT_APP_WS_URL: ws://localhost:8080/ws
+    depends_on:
+      orchestrator:
+        condition: service_healthy
     networks:
       - swift-network
 

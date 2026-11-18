@@ -5,6 +5,7 @@ import com.swiftlogistics.orchestrator.model.enums.OutboxStatus;
 import com.swiftlogistics.orchestrator.repository.OutboxRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageBuilder;
 import org.springframework.amqp.core.MessageProperties;
@@ -16,7 +17,9 @@ import org.springframework.stereotype.Component;
 import java.time.Instant;
 import java.util.List;
 
+/** Set app.outbox.relay.enabled=false to run without the relay (e.g. hermetic tests). */
 @Component
+@ConditionalOnProperty(name = "app.outbox.relay.enabled", havingValue = "true", matchIfMissing = true)
 @EnableScheduling
 @RequiredArgsConstructor
 public class OutboxRelayScheduler {

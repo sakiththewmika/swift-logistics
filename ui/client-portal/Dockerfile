@@ -13,6 +13,13 @@ RUN npm ci
 # Copy all source code
 COPY . .
 
+# Create React App inlines REACT_APP_* values at build time, so they are build arguments
+# (setting them as container environment variables would have no effect on a static build).
+ARG REACT_APP_API_BASE_URL
+ARG REACT_APP_WS_URL
+ENV REACT_APP_API_BASE_URL=$REACT_APP_API_BASE_URL \
+    REACT_APP_WS_URL=$REACT_APP_WS_URL
+
 # Build the app (this creates the production-ready static files)
 RUN npm run build
 
