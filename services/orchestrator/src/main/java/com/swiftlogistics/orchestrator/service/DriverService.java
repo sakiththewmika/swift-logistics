@@ -10,9 +10,12 @@ import com.swiftlogistics.orchestrator.model.enums.EventType;
 import com.swiftlogistics.orchestrator.model.enums.OrderStatus;
 import com.swiftlogistics.orchestrator.repository.OrderRepository;
 import com.swiftlogistics.orchestrator.repository.RouteRepository;
+import com.swiftlogistics.orchestrator.security.AccessGuard;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDateTime;
 import java.util.Arrays;
@@ -35,6 +38,16 @@ public class DriverService {
         return orderRepository.findByStatusInAndDriverId(
                 Arrays.asList(OrderStatus.ASSIGNED, OrderStatus.ROUTED, OrderStatus.IN_TRANSIT,
                         OrderStatus.DELIVERED, OrderStatus.FAILED), driverId);
+    }
+
+    /**
+     * Verifies that the authenticated driver is the one the order is assigned to
+     * (admins are always allowed; no-op when the request is unauthenticated).
+     */
+    public void assertDriverOwnsOrder(String orderId) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found"));
+        AccessGuard.requireOwnerOrAdmin(order.getDriverId());
     }
 
     /**

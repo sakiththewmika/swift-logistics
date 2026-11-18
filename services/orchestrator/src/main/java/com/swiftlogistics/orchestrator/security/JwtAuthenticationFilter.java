@@ -20,7 +20,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         this.jwtService = jwtService;
     }
 
-    @Value("${app.security.require-jwt:false}")
+    @Value("${app.security.require-jwt:true}")
     private boolean requireJwt;
 
     @Override
@@ -37,7 +37,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String token = extractBearerToken(authorization);
         if (token == null) {
             if (requireJwt && isProtectedPath(request)) {
-                writeUnauthorized(response);
+                writeUnauthorized(response, "Authentication required");
                 return;
             }
             filterChain.doFilter(request, response);
@@ -45,7 +45,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         if (!jwtService.isTokenValid(token)) {
-            writeUnauthorized(response);
+            writeUnauthorized(response, "Invalid or expired token");
             return;
         }
 
@@ -53,12 +53,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         try {
             claims = jwtService.validateAndExtractClaims(token);
         } catch (RuntimeException exception) {
-            writeUnauthorized(response);
+            writeUnauthorized(response, "Invalid or expired token");
             return;
         }
-        request.setAttribute("authenticatedUserId", claims.getSubject());
-        request.setAttribute("authenticatedEmail", claims.get("email", String.class));
-        request.setAttribute("authenticatedRole", claims.get("role", String.class));
+        request.setAttribute(AccessGuard.ATTR_USER_ID, claims.getSubject());
+        request.setAttribute(AccessGuard.ATTR_EMAIL, claims.get("email", String.class));
+        request.setAttribute(AccessGuard.ATTR_ROLE, claims.get("role", String.class));
         filterChain.doFilter(request, response);
     }
 
@@ -82,7 +82,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 || path.startsWith("/v3/api-docs/")
                 || path.equals("/v3/api-docs")
                 || path.startsWith("/actuator/")
+                // Browser EventSource and WebSocket handshakes cannot attach an Authorization header.
                 || path.startsWith("/sse/")
+                || path.equals("/ws")
                 || path.startsWith("/ws/");
     }
 
@@ -90,12 +92,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String path = request.getServletPath();
         return path.startsWith("/api/v1/orders/")
                 || path.equals("/api/v1/orders")
-                || path.startsWith("/api/v1/drivers/");
+                || path.startsWith("/api/v1/drivers/")
+                || path.startsWith("/api/v1/recovery/");
     }
 
-    private void writeUnauthorized(HttpServletResponse response) throws IOException {
+    private void writeUnauthorized(HttpServletResponse response, String message) throws IOException {
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
         response.setContentType("application/json");
-        response.getWriter().write("{\"error\":\"Invalid or expired JWT token\"}");
+        response.setCharacterEncoding("UTF-8");
+        response.getWriter().write("{\"message\":\"" + message + "\"}");
     }
 }

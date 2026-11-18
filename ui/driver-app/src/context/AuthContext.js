@@ -34,7 +34,6 @@ export const AuthProvider = ({ children }) => {
     const login = async (driverName, password) => {
         try {
             const user = await loginApi(driverName, password);
-            console.log("user:", user);
             const token = user.driverId;
 
             // Store the token and user details
