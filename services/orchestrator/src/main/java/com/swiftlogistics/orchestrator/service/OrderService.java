@@ -31,6 +31,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 @Service
 @RequiredArgsConstructor
@@ -116,51 +117,56 @@ public class OrderService {
     }
 
     /**
-     * Update order status (called by billing/warehouse/route subscribers)
+     * Moves an order to {@code target} if the state machine allows it. Out-of-order or
+     * repeated events are ignored and reported as an empty result so callers can skip side
+     * effects (events, outbox messages, client notifications).
+     *
+     * @param onTransition optional hook applied to the order only when the transition happens
+     * @return the new status when a transition happened, otherwise empty
      */
-    @Transactional
-    public void updateOrderStatus(String orderId, OrderStatus status) {
-        try {
-            Optional<Order> orderOpt = orderRepository.findById(orderId);
-            if (orderOpt.isEmpty()) {
-                throw new RuntimeException("Order not found: " + orderId);
-            }
-
-            Order order = orderOpt.get();
-            order.setStatus(status);
-            order.setUpdatedAt(LocalDateTime.now());
-            orderRepository.save(order);
-
-            log.info("Order status updated: orderId={}, status={}", orderId, status);
-
-        } catch (Exception e) {
-            log.error("Failed to update order status: orderId={}", orderId, e);
-            throw new RuntimeException("Failed to update order status", e);
+    private Optional<OrderStatus> applyTransition(String orderId, OrderStatus target, Consumer<Order> onTransition) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new RuntimeException("Order not found: " + orderId));
+        OrderStatus current = order.getStatus() == null ? OrderStatus.NEW : order.getStatus();
+        if (current == target) {
+            log.info("Ignoring duplicate status change: orderId={}, status={}", orderId, target);
+            return Optional.empty();
         }
+        if (!OrderStateMachine.canTransition(current, target)) {
+            log.warn("Ignoring out-of-order status change: orderId={}, {} -> {}", orderId, current, target);
+            return Optional.empty();
+        }
+        order.setStatus(target);
+        order.setUpdatedAt(LocalDateTime.now());
+        if (onTransition != null) {
+            onTransition.accept(order);
+        }
+        orderRepository.save(order);
+        log.info("Order status updated: orderId={}, {} -> {}", orderId, current, target);
+        return Optional.of(target);
     }
 
     @Transactional
-    public void updateOrderStatus(String orderId, OrderStatus status, String billingStatus, Double totalAmount) {
-        try {
-            Optional<Order> orderOpt = orderRepository.findById(orderId);
-            if (orderOpt.isEmpty()) {
-                throw new RuntimeException("Order not found: " + orderId);
-            }
+    public Optional<OrderStatus> updateOrderStatus(String orderId, OrderStatus status) {
+        return applyTransition(orderId, status, null);
+    }
 
-            Order order = orderOpt.get();
+    /**
+     * Applies a billing-driven transition. The order's {@code totalAmount} is only replaced by a
+     * billed amount reported by billing; failures and refunds never zero it out.
+     */
+    @Transactional
+    public Optional<OrderStatus> updateOrderStatus(String orderId, OrderStatus status, String billingStatus,
+                                                   Double billedAmount) {
+        return applyTransition(orderId, status, order -> {
             order.setBillingStatus(billingStatus);
-            order.setStatus(status);
-            order.setTotalAmount(totalAmount);
-            order.setUpdatedAt(LocalDateTime.now());
-            orderRepository.save(order);
-
-            log.info("Order billing updated: orderId={}, billingStatus={}",
-                    orderId, billingStatus);
-
-        } catch (Exception e) {
-            log.error("Failed to update order billing: orderId={}", orderId, e);
-            throw new RuntimeException("Failed to update order billing", e);
-        }
+            if (status == OrderStatus.BILLED) {
+                order.setBilledAt(LocalDateTime.now());
+                if (billedAmount != null && billedAmount > 0) {
+                    order.setTotalAmount(billedAmount);
+                }
+            }
+        });
     }
 
     /**
@@ -280,112 +286,167 @@ public class OrderService {
     }
 
     @Transactional
-    public void processBillingUpdate(com.swiftlogistics.orchestrator.dto.BillingUpdateMessage update) {
-        String statusKey = update.getStatus() == null ? "UNKNOWN" : update.getStatus().trim().toUpperCase();
-        if (!markMessageProcessed(update.getOrderId() + ":BILLING_UPDATE:" + statusKey)) return;
-        switch (update.getStatus()) {
+    public Optional<OrderStatus> processBillingUpdate(com.swiftlogistics.orchestrator.dto.BillingUpdateMessage update) {
+        String status = update.getStatus() == null ? "UNKNOWN" : update.getStatus().trim().toUpperCase();
+        if (!markMessageProcessed(update.getOrderId() + ":BILLING_UPDATE:" + status)) return Optional.empty();
+        String orderId = update.getOrderId();
+        Optional<OrderStatus> result;
+        switch (status) {
             case "BILLED" -> {
-                updateOrderStatus(update.getOrderId(), OrderStatus.BILLED, "COMPLETED", update.getBilledAmount());
-                eventService.logSuccessEvent(update.getOrderId(), EventType.BILLING_COMPLETED,
-                        EventSource.CMS_ADAPTER, "Billing completed successfully");
-                sendToWarehouse(update.getOrderId());
+                result = updateOrderStatus(orderId, OrderStatus.BILLED, "COMPLETED", update.getBilledAmount());
+                if (result.isPresent()) {
+                    eventService.logSuccessEvent(orderId, EventType.BILLING_COMPLETED,
+                            EventSource.CMS_ADAPTER, "Billing completed successfully");
+                    sendToWarehouse(orderId);
+                }
             }
             case "FAILED" -> {
-                updateOrderStatus(update.getOrderId(), OrderStatus.BILLING_FAILED, "FAILED", null);
-                eventService.logFailedEvent(update.getOrderId(), EventType.BILLING_FAILED,
-                        EventSource.CMS_ADAPTER, "Billing failed");
+                result = updateOrderStatus(orderId, OrderStatus.BILLING_FAILED, "FAILED", null);
+                result.ifPresent(s -> eventService.logFailedEvent(orderId, EventType.BILLING_FAILED,
+                        EventSource.CMS_ADAPTER, "Billing failed"));
             }
-            case "PENDING" -> eventService.logPendingEvent(update.getOrderId(), EventType.BILLING_PENDING,
-                    EventSource.CMS_ADAPTER, "Billing is pending");
-            case "CANCELLED_REFUNDED" -> {
-                updateOrderStatus(update.getOrderId(), OrderStatus.CANCELLED_REFUNDED, "CANCELLED_REFUNDED", 0D);
-                eventService.logSuccessEvent(update.getOrderId(), EventType.ORDER_CANCELLED,
-                        EventSource.CMS_ADAPTER, "Billing cancelled and refunded");
+            case "PENDING" -> {
+                result = updateOrderStatus(orderId, OrderStatus.BILLING_PENDING, "PENDING", null);
+                result.ifPresent(s -> eventService.logPendingEvent(orderId, EventType.BILLING_PENDING,
+                        EventSource.CMS_ADAPTER, "Billing is pending"));
             }
-            case "BILLING_REFUNDED" -> {
-                updateOrderStatus(update.getOrderId(), OrderStatus.CANCELLED_REFUNDED,
-                        "CANCELLED_REFUNDED", 0D);
-                eventService.logSuccessEvent(update.getOrderId(), EventType.ORDER_CANCELLED,
-                        EventSource.CMS_ADAPTER, "Billing compensation completed");
+            case "CANCELLED_REFUNDED", "BILLING_REFUNDED" -> {
+                result = updateOrderStatus(orderId, OrderStatus.CANCELLED_REFUNDED, "CANCELLED_REFUNDED", null);
+                String description = "BILLING_REFUNDED".equals(status)
+                        ? "Billing compensation completed" : "Billing cancelled and refunded";
+                result.ifPresent(s -> eventService.logSuccessEvent(orderId, EventType.ORDER_CANCELLED,
+                        EventSource.CMS_ADAPTER, description));
             }
             default -> throw new IllegalArgumentException("Unknown billing status: " + update.getStatus());
         }
+        return result;
     }
 
     @Transactional
-    public void processWarehouseUpdate(com.swiftlogistics.orchestrator.dto.WarehouseUpdateMessage update) {
+    public Optional<OrderStatus> processWarehouseUpdate(com.swiftlogistics.orchestrator.dto.WarehouseUpdateMessage update) {
         String status = update.getStatus() == null ? "" : update.getStatus().trim().toUpperCase();
-        if (!markMessageProcessed(update.getOrderId() + ":WAREHOUSE_UPDATE:" + status)) return;
-        if ("FAILED".equals(status)) {
-            updateOrderStatus(update.getOrderId(), OrderStatus.WAREHOUSE_FAILED);
-            eventService.logFailedEvent(update.getOrderId(), EventType.WAREHOUSE_FAILED,
-                    EventSource.WMS_ADAPTER, "Warehouse processing failed");
-            beginBillingCompensation(update.getOrderId(), "Warehouse processing failed");
-        } else if ("COMPENSATED".equals(status) || "PACKAGE_RELEASED".equals(status)
-                || "WAREHOUSE_COMPENSATED".equals(status)) {
-            eventService.logSuccessEvent(update.getOrderId(), EventType.WAREHOUSE_FAILED,
-                    EventSource.WMS_ADAPTER, "Warehouse compensation completed");
-            beginBillingCompensation(update.getOrderId(), "Warehouse compensation completed");
-        } else if ("PROCESSING".equals(status)) {
-            updateOrderStatus(update.getOrderId(), OrderStatus.PROCESSING);
-            eventService.logPendingEvent(update.getOrderId(), EventType.WAREHOUSE_PROCESSING,
-                    EventSource.WMS_ADAPTER, "Warehouse processing in progress");
-        } else if ("READY".equals(status)) {
-            updateOrderStatus(update.getOrderId(), OrderStatus.READY);
-            eventService.logSuccessEvent(update.getOrderId(), EventType.PACKAGE_READY,
-                    EventSource.WMS_ADAPTER, "Package is ready for shipment");
-            requestRoutePlanning(update.getOrderId());
-        } else {
-            throw new IllegalArgumentException("Unknown warehouse status: " + update.getStatus());
+        if (!markMessageProcessed(update.getOrderId() + ":WAREHOUSE_UPDATE:" + status)) return Optional.empty();
+        String orderId = update.getOrderId();
+        switch (status) {
+            case "FAILED" -> {
+                if (updateOrderStatus(orderId, OrderStatus.WAREHOUSE_FAILED).isEmpty()) {
+                    return Optional.empty();
+                }
+                eventService.logFailedEvent(orderId, EventType.WAREHOUSE_FAILED,
+                        EventSource.WMS_ADAPTER, "Warehouse processing failed");
+                return beginBillingCompensation(orderId, "Warehouse processing failed");
+            }
+            case "COMPENSATED", "PACKAGE_RELEASED", "WAREHOUSE_COMPENSATED" -> {
+                // Only meaningful while the warehouse release we asked for is outstanding.
+                if (!isInStatus(orderId, OrderStatus.COMPENSATING_WAREHOUSE)) {
+                    log.warn("Ignoring unexpected warehouse compensation ack: orderId={}", orderId);
+                    return Optional.empty();
+                }
+                eventService.logSuccessEvent(orderId, EventType.WAREHOUSE_FAILED,
+                        EventSource.WMS_ADAPTER, "Warehouse compensation completed");
+                return beginBillingCompensation(orderId, "Warehouse compensation completed");
+            }
+            case "PROCESSING" -> {
+                Optional<OrderStatus> result = updateOrderStatus(orderId, OrderStatus.PROCESSING);
+                result.ifPresent(s -> eventService.logPendingEvent(orderId, EventType.WAREHOUSE_PROCESSING,
+                        EventSource.WMS_ADAPTER, "Warehouse processing in progress"));
+                return result;
+            }
+            case "READY" -> {
+                Optional<OrderStatus> result = applyTransition(orderId, OrderStatus.READY,
+                        order -> order.setPackageReadyAt(LocalDateTime.now()));
+                if (result.isPresent()) {
+                    eventService.logSuccessEvent(orderId, EventType.PACKAGE_READY,
+                            EventSource.WMS_ADAPTER, "Package is ready for shipment");
+                    requestRoutePlanning(orderId);
+                }
+                return result;
+            }
+            default -> throw new IllegalArgumentException("Unknown warehouse status: " + update.getStatus());
         }
     }
 
-    @Transactional
-    public void beginWarehouseCompensation(String orderId, String reason) {
-        updateOrderStatus(orderId, OrderStatus.COMPENSATING_WAREHOUSE);
-        CompensateWarehouseMessage compensation = CompensateWarehouseMessage.builder()
-                .messageId(java.util.UUID.randomUUID().toString())
-                .orderId(orderId)
-                .reason(reason)
-                .timestamp(java.time.LocalDateTime.now())
-                .build();
-        enqueue(compensation, orderId,
-                com.swiftlogistics.orchestrator.config.RabbitMQConfig.EXCHANGE_WAREHOUSE,
-                com.swiftlogistics.orchestrator.config.RabbitMQConfig.ROUTING_KEY_WAREHOUSE_COMPENSATION);
+    private boolean isInStatus(String orderId, OrderStatus expected) {
+        return orderRepository.findById(orderId)
+                .map(order -> order.getStatus() == expected)
+                .orElse(false);
     }
 
+    /** Starts releasing the warehouse package; empty (and no message queued) if not legal from the current status. */
     @Transactional
-    public void beginBillingCompensation(String orderId, String reason) {
-        updateOrderStatus(orderId, OrderStatus.COMPENSATING_BILLING);
-        CompensateBillingMessage compensation = CompensateBillingMessage.builder()
-                .messageId(java.util.UUID.randomUUID().toString())
-                .orderId(orderId)
-                .reason(reason)
-                .timestamp(java.time.LocalDateTime.now())
-                .build();
-        enqueue(compensation, orderId,
-                com.swiftlogistics.orchestrator.config.RabbitMQConfig.EXCHANGE_BILLING_UPDATES,
-                com.swiftlogistics.orchestrator.config.RabbitMQConfig.ROUTING_KEY_BILLING_COMPENSATION);
+    public Optional<OrderStatus> beginWarehouseCompensation(String orderId, String reason) {
+        Optional<OrderStatus> result = updateOrderStatus(orderId, OrderStatus.COMPENSATING_WAREHOUSE);
+        if (result.isPresent()) {
+            CompensateWarehouseMessage compensation = CompensateWarehouseMessage.builder()
+                    .messageId(java.util.UUID.randomUUID().toString())
+                    .orderId(orderId)
+                    .reason(reason)
+                    .timestamp(java.time.LocalDateTime.now())
+                    .build();
+            enqueue(compensation, orderId,
+                    com.swiftlogistics.orchestrator.config.RabbitMQConfig.EXCHANGE_WAREHOUSE,
+                    com.swiftlogistics.orchestrator.config.RabbitMQConfig.ROUTING_KEY_WAREHOUSE_COMPENSATION);
+        }
+        return result;
     }
 
+    /** Starts refunding billing; empty (and no message queued) if not legal from the current status. */
     @Transactional
-    public void processRouteUpdate(com.swiftlogistics.orchestrator.dto.RouteUpdateMessage update,
-                                   RouteService routeService) {
+    public Optional<OrderStatus> beginBillingCompensation(String orderId, String reason) {
+        Optional<OrderStatus> result = updateOrderStatus(orderId, OrderStatus.COMPENSATING_BILLING);
+        if (result.isPresent()) {
+            CompensateBillingMessage compensation = CompensateBillingMessage.builder()
+                    .messageId(java.util.UUID.randomUUID().toString())
+                    .orderId(orderId)
+                    .reason(reason)
+                    .timestamp(java.time.LocalDateTime.now())
+                    .build();
+            enqueue(compensation, orderId,
+                    com.swiftlogistics.orchestrator.config.RabbitMQConfig.EXCHANGE_BILLING_UPDATES,
+                    com.swiftlogistics.orchestrator.config.RabbitMQConfig.ROUTING_KEY_BILLING_COMPENSATION);
+        }
+        return result;
+    }
+
+    /**
+     * Handles a route-planning result. A failed route marks the order {@code ROUTE_FAILED}, logs it,
+     * moves it to {@code COMPENSATING_WAREHOUSE} and queues the warehouse release in this one
+     * transaction, so a crash can never leave a failed route without its compensation.
+     */
+    @Transactional
+    public Optional<OrderStatus> processRouteUpdate(com.swiftlogistics.orchestrator.dto.RouteUpdateMessage update,
+                                                    RouteService routeService) {
         String status = update.getStatus() == null ? "" : update.getStatus().trim().toUpperCase();
-        if (!markMessageProcessed(update.getOrderId() + ":ROUTE_UPDATE:" + status)) return;
-        if ("ROUTED".equals(status)) {
-            routeService.createOrderRoute(update.getOrderId(), update.getWaypoints(),
-                    update.getDriverId(), update.getVehicleId());
-        } else if ("FAILED".equals(status)) {
-            updateOrderStatus(update.getOrderId(), OrderStatus.ROUTE_FAILED);
-            eventService.logFailedEvent(update.getOrderId(), EventType.ROUTE_FAILED,
-                    EventSource.ROS_ADAPTER, "Route planning failed");
-        } else if ("ROUTING".equals(status)) {
-            updateOrderStatus(update.getOrderId(), OrderStatus.ROUTING);
-            eventService.logPendingEvent(update.getOrderId(), EventType.ROUTE_PENDING,
-                    EventSource.ROS_ADAPTER, "Route planning is in progress");
-        } else {
-            throw new IllegalArgumentException("Unknown route status: " + update.getStatus());
+        if (!markMessageProcessed(update.getOrderId() + ":ROUTE_UPDATE:" + status)) return Optional.empty();
+        String orderId = update.getOrderId();
+        switch (status) {
+            case "ROUTED" -> {
+                OrderStatus current = orderRepository.findById(orderId)
+                        .orElseThrow(() -> new RuntimeException("Order not found: " + orderId))
+                        .getStatus();
+                if (!OrderStateMachine.canTransition(current, OrderStatus.ROUTED)) {
+                    log.warn("Ignoring out-of-order route result: orderId={}, current={}", orderId, current);
+                    return Optional.empty();
+                }
+                routeService.createOrderRoute(orderId, update.getWaypoints(),
+                        update.getDriverId(), update.getVehicleId());
+                return Optional.of(OrderStatus.ROUTED);
+            }
+            case "FAILED" -> {
+                if (updateOrderStatus(orderId, OrderStatus.ROUTE_FAILED).isEmpty()) {
+                    return Optional.empty();
+                }
+                eventService.logFailedEvent(orderId, EventType.ROUTE_FAILED,
+                        EventSource.ROS_ADAPTER, "Route planning failed");
+                return beginWarehouseCompensation(orderId, "Route planning failed");
+            }
+            case "ROUTING" -> {
+                Optional<OrderStatus> result = updateOrderStatus(orderId, OrderStatus.ROUTING);
+                result.ifPresent(s -> eventService.logPendingEvent(orderId, EventType.ROUTE_PENDING,
+                        EventSource.ROS_ADAPTER, "Route planning is in progress"));
+                return result;
+            }
+            default -> throw new IllegalArgumentException("Unknown route status: " + update.getStatus());
         }
     }
 

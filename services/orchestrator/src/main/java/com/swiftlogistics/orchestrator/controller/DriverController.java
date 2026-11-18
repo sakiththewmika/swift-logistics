@@ -50,6 +50,8 @@ public class DriverController {
         try {
             driverService.startDelivery(orderId);
             return ResponseEntity.ok().build();
+        } catch (ResponseStatusException e) {
+            throw e;
         } catch (Exception e) {
             log.error("Failed to start delivery for order: {}", orderId, e);
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to start delivery");
@@ -63,6 +65,8 @@ public class DriverController {
         try {
             driverService.completeDelivery(orderId);
             return ResponseEntity.ok().build();
+        } catch (ResponseStatusException e) {
+            throw e;
         } catch (Exception e) {
             log.error("Failed to complete delivery for order: {}", orderId, e);
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to complete delivery");
@@ -79,6 +83,8 @@ public class DriverController {
         try {
             driverService.recordProofOfDelivery(driverId, orderId, request);
             return ResponseEntity.ok().build();
+        } catch (ResponseStatusException e) {
+            throw e;
         } catch (IllegalArgumentException e) {
             log.warn("Invalid POD submission for order {}: {}", orderId, e.getMessage());
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());

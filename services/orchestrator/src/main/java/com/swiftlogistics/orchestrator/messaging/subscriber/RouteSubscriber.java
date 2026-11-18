@@ -8,7 +8,9 @@ import com.swiftlogistics.orchestrator.model.enums.EventType;
 import com.swiftlogistics.orchestrator.model.enums.OrderStatus;
 import com.swiftlogistics.orchestrator.service.OrderService;
 import com.swiftlogistics.orchestrator.service.EventService;
+import com.swiftlogistics.orchestrator.service.StatusMessages;
 import com.swiftlogistics.orchestrator.service.RouteService;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
@@ -41,27 +43,25 @@ public class RouteSubscriber {
             log.info("Received route update: orderId={}, status={}",
                     routeUpdate.getOrderId(), routeUpdate.getStatus());
 
-            orderService.processRouteUpdate(routeUpdate, routeService);
-            if ("ROUTED".equalsIgnoreCase(routeUpdate.getStatus())) {
-                ssePublisher.publishOrderStatusUpdate(routeUpdate.getOrderId(), OrderStatus.ROUTED,
-                        "Route created successfully");
-                if (routeUpdate.getDriverId() != null) {
-                    messagingTemplate.convertAndSend(
-                            "/topic/drivers/" + routeUpdate.getDriverId() + "/dispatch",
-                            routeUpdate);
+            Optional<OrderStatus> result = orderService.processRouteUpdate(routeUpdate, routeService);
+            result.ifPresent(status -> {
+                String orderId = routeUpdate.getOrderId();
+                if (status == OrderStatus.ROUTED) {
+                    ssePublisher.publishOrderStatusUpdate(orderId, status, StatusMessages.describe(status));
+                    if (routeUpdate.getDriverId() != null) {
+                        messagingTemplate.convertAndSend(
+                                "/topic/drivers/" + routeUpdate.getDriverId() + "/dispatch",
+                                routeUpdate);
+                    }
+                } else if (status == OrderStatus.COMPENSATING_WAREHOUSE) {
+                    // The route failure and its compensation were committed together.
+                    ssePublisher.publishOrderStatusUpdate(orderId, OrderStatus.ROUTE_FAILED,
+                            StatusMessages.describe(OrderStatus.ROUTE_FAILED));
+                    ssePublisher.publishOrderStatusUpdate(orderId, status, StatusMessages.describe(status));
+                } else {
+                    ssePublisher.publishOrderStatusUpdate(orderId, status, StatusMessages.describe(status));
                 }
-            } else if ("FAILED".equalsIgnoreCase(routeUpdate.getStatus())) {
-                ssePublisher.publishOrderStatusUpdate(routeUpdate.getOrderId(), OrderStatus.ROUTE_FAILED,
-                        "Route planning failed");
-                orderService.beginWarehouseCompensation(routeUpdate.getOrderId(),
-                        "Route planning failed");
-                ssePublisher.publishOrderStatusUpdate(routeUpdate.getOrderId(),
-                        OrderStatus.COMPENSATING_WAREHOUSE,
-                        "Route failed; warehouse compensation started");
-            } else if ("ROUTING".equalsIgnoreCase(routeUpdate.getStatus())) {
-                ssePublisher.publishOrderStatusUpdate(routeUpdate.getOrderId(), OrderStatus.ROUTING,
-                        "Route planning is in progress");
-            }
+            });
 
             log.info("Route update processed successfully for order: {}", routeUpdate.getOrderId());
             CorrelationIdContext.clear();

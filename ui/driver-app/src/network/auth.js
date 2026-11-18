@@ -29,10 +29,11 @@ export const signup = (driver) => {
 };
 
 /**
- * Logs out the currently authenticated driver.
+ * Logs out a driver so the server can mark them unavailable.
  *
+ * @param {string} username - The driver's name or id (the server resolves either).
  * @returns {Promise<object>} A promise that resolves to the logout response.
  */
-export const logout = () => {
-    return apiClient.post('/auth/driver-logout');
+export const logout = (username) => {
+    return apiClient.post('/auth/driver-logout', { username });
 };
