@@ -29,6 +29,10 @@
     <properties>
         <java.version>21</java.version>
         <spring-cloud.version>2023.0.3</spring-cloud.version>
+        <!-- Boot 3.2.x manages Lombok 1.18.32, which cannot run on JDK 23+; 1.18.38 supports JDK 21 through 26. -->
+        <lombok.version>1.18.38</lombok.version>
+        <!-- Boot 3.2.x manages a Byte Buddy that Mockito cannot use on JDK 24+; align with the newer Boot line. -->
+        <byte-buddy.version>1.17.7</byte-buddy.version>
     </properties>
     <dependencyManagement>
         <dependencies>
@@ -167,6 +171,15 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
             </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>

@@ -8,6 +8,7 @@ import com.swiftlogistics.orchestrator.model.enums.EventType;
 import com.swiftlogistics.orchestrator.model.enums.OrderStatus;
 import com.swiftlogistics.orchestrator.service.OrderService;
 import com.swiftlogistics.orchestrator.service.EventService;
+import com.swiftlogistics.orchestrator.service.StatusMessages;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
@@ -37,24 +38,9 @@ public class WarehouseSubscriber {
             log.info("Received warehouse update: orderId={}, status={}",
                     warehouseUpdate.getOrderId(), warehouseUpdate.getStatus());
 
-            orderService.processWarehouseUpdate(warehouseUpdate);
-            if ("READY".equalsIgnoreCase(warehouseUpdate.getStatus())) {
-                ssePublisher.publishOrderStatusUpdate(warehouseUpdate.getOrderId(), OrderStatus.READY,
-                        "Package is ready for shipment");
-            } else if ("FAILED".equalsIgnoreCase(warehouseUpdate.getStatus())) {
-                ssePublisher.publishOrderStatusUpdate(warehouseUpdate.getOrderId(),
-                        OrderStatus.COMPENSATING_BILLING,
-                        "Warehouse processing failed; billing compensation started");
-            } else if ("COMPENSATED".equalsIgnoreCase(warehouseUpdate.getStatus())
-                    || "PACKAGE_RELEASED".equalsIgnoreCase(warehouseUpdate.getStatus())
-                    || "WAREHOUSE_COMPENSATED".equalsIgnoreCase(warehouseUpdate.getStatus())) {
-                ssePublisher.publishOrderStatusUpdate(warehouseUpdate.getOrderId(),
-                        OrderStatus.COMPENSATING_BILLING,
-                        "Warehouse compensation completed; billing compensation started");
-            } else if ("PROCESSING".equalsIgnoreCase(warehouseUpdate.getStatus())) {
-                ssePublisher.publishOrderStatusUpdate(warehouseUpdate.getOrderId(), OrderStatus.PROCESSING,
-                        "Warehouse processing in progress");
-            }
+            orderService.processWarehouseUpdate(warehouseUpdate).ifPresent(status ->
+                    ssePublisher.publishOrderStatusUpdate(warehouseUpdate.getOrderId(), status,
+                            StatusMessages.describe(status)));
             CorrelationIdContext.clear();
 
         } catch (Exception e) {

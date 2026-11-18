@@ -31,9 +31,8 @@ public class SsePublisher {
      * Publish order status updates via SSE
      */
     public void publishOrderStatusUpdate(String orderId, OrderStatus status, String message) {
+        SseEmitter emitter = sseController.getOrderEmitters().get(orderId);
         try {
-            SseEmitter emitter = sseController.getOrderEmitters().get(orderId);
-
             if (emitter != null) {
                 OrderStatusMessage orderMessage = OrderStatusMessage.builder()
                         .orderId(orderId)
@@ -54,7 +53,7 @@ public class SsePublisher {
         } catch (IOException | IllegalStateException e) {
             log.error("Failed to publish Order Status Update via SSE: orderId={}, status={}", orderId, status, e);
             // Remove the emitter if there's an error (likely disconnected client)
-            sseController.getOrderEmitters().remove(orderId);
+            sseController.getOrderEmitters().remove(orderId, emitter);
         }
     }
 
@@ -71,7 +70,7 @@ public class SsePublisher {
             } catch (IOException | IllegalStateException e) {
                 log.warn("Removing disconnected location SSE client for order {}",
                         telemetry.getOrderId(), e);
-                sseController.getOrderEmitters().remove(telemetry.getOrderId());
+                sseController.getOrderEmitters().remove(telemetry.getOrderId(), emitter);
         }
     }
 }

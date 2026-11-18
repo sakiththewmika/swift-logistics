@@ -4,14 +4,12 @@ import AuthPage from './components/AuthPage';
 import NextDeliveryCard from './components/NextDeliveryCard';
 import DeliveriesList from './components/DeliveriesList';
 import CurrentLocationCard from './components/CurrentLocationCard';
-import StatusUpdateModal from './components/StatusUpdateModal';
 import ProofOfDeliveryModal from './components/ProofOfDeliveryModal';
-import { Truck, AlertTriangle, Radio, Shield, LogOut, CheckCircle2 } from 'lucide-react';
+import { Truck } from 'lucide-react';
 import './AppStyles.css';
 import {
   getAssignedOrders,
   startDelivery,
-  completeDelivery,
   submitProofOfDelivery,
 } from './network/driver';
 import { useDriverWebSocket } from './network/useDriverWebSocket';
@@ -21,8 +19,7 @@ const MainDriverApp = () => {
   const { driver, logout } = useAuth();
   const [currentLocation, setCurrentLocation] = useState('Colombo Central Hub, Peliyagoda');
   const [deliveries, setDeliveries] = useState([]);
-  const [selectedDelivery, setSelectedDelivery] = useState(null);
-  const [showStatusUpdate, setShowStatusUpdate] = useState(false);
+  const [actionError, setActionError] = useState('');
   const [showProofOfDelivery, setShowProofOfDelivery] = useState(false);
   const [proofDelivery, setProofDelivery] = useState(null);
   const [podMode, setPodMode] = useState('DELIVERED'); // 'DELIVERED' or 'FAILED'
@@ -37,6 +34,7 @@ const MainDriverApp = () => {
   });
 
   const simTimerRef = useRef(null);
+  const simOrderRef = useRef(null); // order the simulated drive currently belongs to
 
   const handleDispatch = useCallback((dispatch) => {
     setDeliveries((prev) => {
@@ -59,7 +57,8 @@ const MainDriverApp = () => {
       const fetchDeliveries = () => {
         getAssignedOrders(driver.driverId)
           .then((data) => setDeliveries(data || []))
-          .catch(() => setDeliveries([]));
+          // Keep showing the last known deliveries through a network blip instead of emptying the screen.
+          .catch((err) => console.warn('Could not refresh deliveries:', err.message));
       };
       fetchDeliveries();
       const interval = setInterval(fetchDeliveries, 5000);
@@ -78,7 +77,9 @@ const MainDriverApp = () => {
   const { connected: websocketConnected, publishLocation } = useDriverWebSocket(
     driver?.driverId,
     nextDelivery?.id ?? nextDelivery?.orderId,
-    handleDispatch
+    handleDispatch,
+    undefined,
+    isSimulating
   );
 
   // Stop simulation on unmount
@@ -106,7 +107,9 @@ const MainDriverApp = () => {
       const destLat = destCoords[0];
       const destLng = destCoords[1];
 
-      let progress = simProgress >= 100 ? 0 : simProgress;
+      // Resume only the same order's drive; a different order (or a finished drive) starts from the hub.
+      let progress = simOrderRef.current === activeOrderId && simProgress < 100 ? simProgress : 0;
+      simOrderRef.current = activeOrderId;
       setSimProgress(progress);
 
       simTimerRef.current = setInterval(() => {
@@ -174,6 +177,7 @@ const MainDriverApp = () => {
   const resetToHub = useCallback(() => {
     if (simTimerRef.current) clearInterval(simTimerRef.current);
     setIsSimulating(false);
+    simOrderRef.current = null;
     setSimProgress(0);
     const coords = {
       latitude: WAREHOUSE_COORDS[0],
@@ -188,17 +192,22 @@ const MainDriverApp = () => {
   // Guided Action Progression: Step A
   const handleStartTrip = async (orderId) => {
     if (!orderId) return;
+    // Start the delivery that was chosen, not just whichever is first in the queue.
+    const target =
+      deliveries.find((d) => (d.id ?? d.orderId) === orderId) || nextDelivery;
     try {
+      setActionError('');
       await startDelivery(orderId);
       setDeliveries((prev) =>
         prev.map((d) =>
           (d.id ?? d.orderId) === orderId ? { ...d, status: 'IN_TRANSIT' } : d
         )
       );
-      // Automatically launch the live GPS drive simulation
-      startSimulation(nextDelivery);
+      // Automatically launch the live GPS drive simulation for that delivery
+      startSimulation(target);
     } catch (err) {
       console.error('Failed to start delivery trip:', err);
+      setActionError(err.message || 'Could not start this delivery.');
     }
   };
 
@@ -222,9 +231,9 @@ const MainDriverApp = () => {
     setShowProofOfDelivery(false);
     setProofDelivery(null);
     pauseSimulation();
-    if (proof.status === 'DELIVERED') {
-      setSimProgress(100);
-    }
+    simOrderRef.current = null;
+    // A finished drive stays complete; after a failed attempt the next order starts from the hub.
+    setSimProgress(proof.status === 'DELIVERED' ? 100 : 0);
   };
 
   const handleUpdateLocation = () => {
@@ -236,7 +245,7 @@ const MainDriverApp = () => {
     if (driver?.driverId) {
       getAssignedOrders(driver.driverId)
         .then((data) => setDeliveries(data || []))
-        .catch(() => setDeliveries([]));
+        .catch((err) => setActionError(`Could not refresh deliveries: ${err.message}`));
     }
   };
 
@@ -433,6 +442,33 @@ const MainDriverApp = () => {
 
       {/* Main Courier Dashboard Content */}
       <main style={{ maxWidth: 1000, margin: '20px auto', padding: '0 16px' }}>
+        {actionError && (
+          <div
+            role="alert"
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: 12,
+              backgroundColor: '#fef2f2',
+              border: '1px solid #fecaca',
+              color: '#991b1b',
+              padding: '10px 14px',
+              borderRadius: 8,
+              marginBottom: 12,
+              fontSize: 13,
+            }}
+          >
+            <span>{actionError}</span>
+            <button
+              type="button"
+              onClick={() => setActionError('')}
+              style={{ background: 'none', border: 'none', color: '#991b1b', cursor: 'pointer', fontWeight: 600 }}
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
         {/* Step A & B: Guided Next Delivery Card */}
         <NextDeliveryCard
           delivery={nextDelivery}
@@ -473,20 +509,16 @@ const MainDriverApp = () => {
       </main>
 
       {/* Modals */}
-      <StatusUpdateModal
-        delivery={selectedDelivery}
-        onInTransit={() => handleStartTrip(selectedDelivery?.id ?? selectedDelivery?.orderId)}
-        onComplete={() => handleOpenPod(selectedDelivery, 'DELIVERED')}
-        onFail={() => handleOpenPod(selectedDelivery, 'FAILED')}
-        onCancel={() => setShowStatusUpdate(false)}
-      />
-
-      <ProofOfDeliveryModal
-        delivery={showProofOfDelivery ? proofDelivery : null}
-        initialMode={podMode}
-        onSubmit={submitProof}
-        onCancel={() => setShowProofOfDelivery(false)}
-      />
+      {/* Mounted only while open (keyed per order) so signature, photo and notes never leak between orders. */}
+      {showProofOfDelivery && proofDelivery && (
+        <ProofOfDeliveryModal
+          key={proofDelivery.id ?? proofDelivery.orderId}
+          delivery={proofDelivery}
+          initialMode={podMode}
+          onSubmit={submitProof}
+          onCancel={() => setShowProofOfDelivery(false)}
+        />
+      )}
     </div>
   );
 };

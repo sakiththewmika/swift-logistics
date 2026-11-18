@@ -14,6 +14,7 @@ import com.swiftlogistics.cms_adapter.wsdl.CancelInvoiceRequest;
 import com.swiftlogistics.cms_adapter.wsdl.CancelInvoiceResponse;
 import com.swiftlogistics.cms_adapter.wsdl.CancelOrderBillingRequest;
 import com.swiftlogistics.cms_adapter.wsdl.CancelOrderBillingResponse;
+import org.springframework.ws.client.WebServiceIOException;
 import org.springframework.ws.client.core.support.WebServiceGatewaySupport;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
@@ -80,7 +81,8 @@ public class CmsSoapClient extends WebServiceGatewaySupport {
                 throw new IllegalStateException("CMS SOAP call was interrupted", exception);
             } catch (TimeoutException exception) {
                 future.cancel(true);
-                throw new IllegalStateException("CMS SOAP call timed out", exception);
+                // A timeout is a transport-level failure: surface it as one so it is retried like any other.
+                throw new WebServiceIOException("CMS SOAP call timed out", new java.io.IOException(exception));
             } catch (ExecutionException exception) {
                 Throwable cause = exception.getCause();
                 if (cause instanceof OperationFailureException failure

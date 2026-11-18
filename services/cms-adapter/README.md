@@ -1,207 +1,50 @@
 # CMS Adapter Service
 
-A Spring Boot microservice that acts as an adapter between the SwiftLogistics system and external CMS (Content Management System) services. This service handles order processing through SOAP web services and manages billing updates via RabbitMQ messaging.
+Translates between the platform's RabbitMQ bus and the legacy **Client Management System** (billing),
+which speaks SOAP/XML. Spring Boot 3.5, Java 21, Spring-WS, Resilience4j.
 
-## Overview
+## What it does
 
-The CMS Adapter is part of the SwiftLogistics middleware architecture, designed to:
-- Consume order messages from RabbitMQ queues
-- Process orders through external CMS SOAP services
-- Publish billing updates back to the message queue
-- Provide health monitoring endpoints
+| Direction | Queue | Action |
+|---|---|---|
+| in | `order-created` | Calls SOAP `SubmitOrder`; publishes `BILLED` / `FAILED` / `PENDING` to `billing-updates` |
+| in | `billing-compensation` | Calls SOAP `CancelOrderBilling` (refund); publishes `BILLING_REFUNDED` |
+| in | `billing-rollback` | legacy queue with no producer; same refund handling |
+| out | `billing-updates` (exchange `billing-updates.exchange`, key `billing.updated`) | results for the orchestrator |
 
-## Features
+## Resilience
 
-- **Message-Driven Architecture**: Consumes order messages from RabbitMQ
-- **SOAP Web Services**: Integrates with external CMS systems using SOAP
-- **Auto-Generated Client Code**: Uses Apache CXF to generate SOAP client code from WSDL
-- **Health Monitoring**: Provides health check endpoints
+- **Circuit breaker** (`cmsSoapBreaker`): window 10, at least 5 calls, 50 % failure rate, open for 30 s,
+  2 half-open calls; each call is limited to 4 s.
+- **Retries:** transport failures and timeouts are retried 4 times (1 s, 2 s, 4 s back-off). When they are
+  exhausted a `@Recover` handler publishes a `FAILED` billing update and acknowledges the message, so the
+  order ends in `BILLING_FAILED` instead of staying in `NEW`. Permanent SOAP failures fail immediately.
+- **Open circuit:** the message is held for `cms.circuit-open-requeue-delay-ms` (default 5000) and requeued,
+  so the consumer does not spin; the order waits and continues once the CMS is back.
+- **Idempotency:** `processed_messages` in MongoDB, keyed `orderId:CMS_BILLING` / `orderId:CMS_REFUND`.
+- **Dead-lettering:** failed messages go to the queue's `.dlq` rather than being requeued forever.
 
-## Technology Stack
-
-- **Java 21** - Programming language
-- **Spring Boot 3.5.5** - Application framework
-- **Apache CXF 4.0.5** - SOAP web services
-- **RabbitMQ** - Message broker
-- **Maven** - Build tool
-
-## Project Structure
-
-```
-src/
-├── main/
-│   ├── java/com/swiftlogistics/cms_adapter/
-│   │   ├── CmsAdapterApplication.java          # Main application class
-│   │   ├── config/
-│   │   │   ├── RabbitMQConfig.java            # RabbitMQ configuration
-│   │   │   ├── RabbitTemplateConfig.java      # RabbitMQ template setup
-│   │   │   └── SoapClientConfig.java          # SOAP client configuration
-│   │   ├── consumer/
-│   │   │   └── OrderConsumer.java             # RabbitMQ message consumer
-│   │   ├── controller/
-│   │   │   └── HealthController.java          # Health check endpoint
-│   │   ├── model/
-│   │   │   ├── OrderMessage.java              # Order data model
-│   │   │   └── BillingUpdateMessage.java      # Billing update model
-│   │   ├── producer/
-│   │   │   └── BillingUpdatePublisher.java    # RabbitMQ message publisher
-│   │   └── soap/
-│   │       └── CmsSoapClient.java             # SOAP client implementation
-│   └── resources/
-│       ├── application.properties             # Application configuration
-│       └── wsdl/
-│           └── orderService.wsdl              # SOAP service definition
-└── test/
-    └── java/com/swiftlogistics/cms_adapter/
-        └── CmsAdapterApplicationTests.java    # Unit tests
-```
-
-## Message Flow
-
-### Order Processing Flow
-1. **Order Created**: Orchestrator publishes order to `order-created` queue
-2. **Order Consumption**: CMS Adapter consumes the order message
-3. **SOAP Call**: Adapter calls external CMS SOAP service with order details
-4. **Billing Update**: On success, publishes billing update to `billing-updates` queue
-
-### Queue Configuration
-- **Input Queue**: `order-created` - Receives order messages from orchestrator
-- **Output Queue**: `billing-updates` - Sends billing updates back to orchestrator
-
-[//]: # (- **Dead Letter Queues**: Configured for error handling and message recovery)
+The SOAP endpoint is fixed in `SoapClientConfig` as `http://cms-mock-service:5001/ws` (the compose
+container name); it is not discovered through Consul.
 
 ## Configuration
 
-### Environment Variables
+| Variable | Default | Purpose |
+|---|---|---|
+| `SERVER_PORT` | `8001` | HTTP port (`GET /health`, actuator) |
+| `MONGODB_URI` | `mongodb://mongo:27017/swift-logic?replicaSet=rs0` | de-duplication store |
+| `RABBITMQ_HOST`, `RABBITMQ_PORT`, `RABBITMQ_USERNAME`, `RABBITMQ_PASSWORD` | `rabbitmq`, `5672`, `guest` | broker |
+| `CONSUL_HOST`, `CONSUL_PORT` | `consul`, `8500` | registry |
+| `resilience4j.*.cmsSoapBreaker.*` | see `application.properties` | breaker and time limit |
+
+## Running and testing
+
+Run with the whole stack: `cd ../../infra && docker compose up --build -d`.
+
+Tests (no broker, database or CMS needed; the context test uses the hermetic `test` profile):
+
 ```bash
-# RabbitMQ Configuration
-SPRING_RABBITMQ_HOST=localhost
-SPRING_RABBITMQ_PORT=5672
-SPRING_RABBITMQ_USERNAME=guest
-SPRING_RABBITMQ_PASSWORD=guest
-
-# CMS SOAP Service Configuration
-CMS_SOAP_ENDPOINT=http://localhost:5000/cms/orders
-
-# Application Configuration
-SERVER_PORT=8082
+docker run --rm -v "$PWD":/app -w /app maven:3.9.9-eclipse-temurin-21 mvn -B test
 ```
 
-### Application Properties
-Configure the application by setting properties in `application.properties` or through environment variables.
-
-## Getting Started
-
-### Prerequisites
-- Java 21 or higher
-- Maven 3.6+
-- RabbitMQ server
-- Docker (for containerized deployment)
-
-### Local Development
-
-1. **Build the application**
-   ```bash
-   mvn clean compile
-   ```
-
-2. **Run tests**
-   ```bash
-   mvn test
-   ```
-
-3. **Start the application**
-   ```bash
-   mvn spring-boot:run
-   ```
-
-The application will start on `http://localhost:8082`
-
-### Docker Deployment
-
-1. **Build Docker image**
-   ```bash
-   docker build -t cms-adapter:latest .
-   ```
-
-2. **Run container**
-   ```bash
-   docker run -p 8082:8082 \
-     -e SPRING_RABBITMQ_HOST=your-rabbitmq-host \
-     -e CMS_SOAP_ENDPOINT=your-cms-endpoint \
-     cms-adapter:latest
-   ```
-
-3. **Run with Docker Compose** (if you have a compose file)
-   ```bash
-   docker-compose up -d
-   ```
-
-## API Endpoints
-
-### Health Check
-- **GET** `/health` - Returns application health status
-  ```bash
-  curl http://localhost:8082/health
-  ```
-  Response: `CMS Adapter is running!`
-
-## Message Schemas
-
-### Order Message (Input)
-```json
-{
-  "orderId": "ORD-12345",
-  "customerId": "CUST-001",
-  "customerName": "John Doe",
-  "customerEmail": "john.doe@example.com",
-  "deliveryAddress": "123 Main St",
-  "city": "New York",
-  "postalCode": "10001",
-  "country": "USA",
-  "totalAmount": 99.99,
-  "timestamp": "2025-09-20T10:30:00"
-}
-```
-
-### Billing Update Message (Output)
-```json
-{
-  "orderId": "ORD-12345",
-  "amount": 99.99,
-  "status": "BILLED",
-  "timestamp": "2025-09-20T10:30:05"
-}
-```
-
-## Monitoring and Logging
-
-- Application logs are output to console in structured format
-- Health endpoint available at `/health`
-- RabbitMQ message processing is logged with order details
-- SOAP service calls are logged for debugging
-
-[//]: # (## Error Handling)
-
-[//]: # ()
-[//]: # (- **Dead Letter Queues**: Failed messages are routed to DLQ for manual inspection)
-
-[//]: # (- **Retry Logic**: Configurable retry attempts for failed SOAP calls)
-
-[//]: # (- **Circuit Breaker**: Protection against external service failures)
-
-[//]: # (- **Graceful Degradation**: Application continues running even if external services are down)
-
-## Development
-
-### Code Generation
-SOAP client code is automatically generated from WSDL files using Apache CXF Maven plugin:
-```bash
-mvn generate-sources
-```
-
-### Adding New SOAP Services
-1. Place WSDL file in `src/main/resources/wsdl/`
-2. Update `pom.xml` CXF plugin configuration
-3. Run `mvn generate-sources`
-4. Implement client wrapper in `soap/` package
+The SOAP client classes are generated from `src/main/resources/wsdl/orderService.wsdl` during the build.

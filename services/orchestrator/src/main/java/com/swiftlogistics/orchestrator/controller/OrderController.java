@@ -7,6 +7,8 @@ import com.swiftlogistics.orchestrator.service.OrderService;
 import com.swiftlogistics.orchestrator.service.EventService;
 import com.swiftlogistics.orchestrator.model.IdempotencyRecord;
 import com.swiftlogistics.orchestrator.repository.IdempotencyRecordRepository;
+import com.swiftlogistics.orchestrator.security.AccessGuard;
+import jakarta.validation.Valid;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
@@ -40,8 +42,11 @@ public class OrderController {
     @PostMapping
     public ResponseEntity<Order> createOrder(
             @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey,
-            @RequestBody CreateOrderRequest request) {
+            @Valid @RequestBody CreateOrderRequest request) {
         log.info("Creating new order for customer: {}", request.getCustomerId());
+
+        AccessGuard.requireAnyRole(AccessGuard.ROLE_CUSTOMER, AccessGuard.ROLE_ADMIN);
+        AccessGuard.requireOwnerOrAdmin(request.getCustomerId());
 
         try {
             if (idempotencyKey == null || idempotencyKey.isBlank()) {
@@ -60,7 +65,10 @@ public class OrderController {
                             "Idempotency key is currently being processed");
                 }
                 return orderService.getOrder(existing.getOrderId())
-                        .map(ResponseEntity::ok)
+                        .map(existingOrder -> {
+                            AccessGuard.requireOrderAccess(existingOrder.getCustomerId(), existingOrder.getDriverId());
+                            return ResponseEntity.ok(existingOrder);
+                        })
                         .orElseThrow(() -> new ResponseStatusException(HttpStatus.CONFLICT,
                                 "Idempotency key points to an unavailable order"));
             }
@@ -79,7 +87,7 @@ public class OrderController {
                         .ifPresent(record -> idempotencyRecordRepository.deleteById(idempotencyKey));
             }
             log.error("Failed to create order for customer: {}", request.getCustomerId(), e);
-            return ResponseEntity.internalServerError().build();
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to create order");
         }
     }
 
@@ -88,9 +96,10 @@ public class OrderController {
      */
     @GetMapping("/{orderId}")
     public ResponseEntity<Order> getOrder(@PathVariable String orderId) {
-        Optional<Order> order = orderService.getOrder(orderId);
-        return order.map(ResponseEntity::ok)
-                   .orElse(ResponseEntity.notFound().build());
+        Order order = orderService.getOrder(orderId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found"));
+        AccessGuard.requireOrderAccess(order.getCustomerId(), order.getDriverId());
+        return ResponseEntity.ok(order);
     }
 
     /**
@@ -98,6 +107,8 @@ public class OrderController {
      */
     @GetMapping("/customer/{customerId}")
     public ResponseEntity<List<Order>> getOrdersByCustomer(@PathVariable String customerId) {
+        AccessGuard.requireAnyRole(AccessGuard.ROLE_CUSTOMER, AccessGuard.ROLE_ADMIN);
+        AccessGuard.requireOwnerOrAdmin(customerId);
         List<Order> orders = orderService.getOrdersByCustomer(customerId);
         return ResponseEntity.ok(orders);
     }
@@ -107,12 +118,15 @@ public class OrderController {
      */
     @GetMapping("/{orderId}/events")
     public ResponseEntity<List<Event>> getOrderEvents(@PathVariable String orderId) {
+        Order order = orderService.getOrder(orderId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found"));
+        AccessGuard.requireOrderAccess(order.getCustomerId(), order.getDriverId());
         try {
             List<Event> events = eventService.getOrderEvents(orderId);
             return ResponseEntity.ok(events);
         } catch (Exception e) {
             log.error("Failed to retrieve events for order: {}", orderId, e);
-            return ResponseEntity.internalServerError().build();
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to retrieve order events");
         }
     }
 

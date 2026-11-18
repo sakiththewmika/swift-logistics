@@ -77,6 +77,13 @@ MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongo:27017/swift-logic?replicaSet
 # This special URL points from inside a Docker container to your host machine.
 ROS_API_URL = os.getenv("ROS_API_URL", "http://127.0.0.1:3001/optimize-route")
 ROS_SERVICE_NAME = os.getenv("ROS_SERVICE_NAME", "ros-mock")
+# A dedup row left in PROCESSING longer than this belongs to a crashed attempt and may be reclaimed.
+DEDUP_STALE_SECONDS = int(os.getenv("DEDUP_STALE_SECONDS", "60"))
+
+
+def chaos_hooks_enabled():
+    """Demo failure triggers (e.g. the [FAIL_ROUTE] address marker). On by default, off in production."""
+    return os.getenv("ENABLE_CHAOS_HOOKS", "true").lower() == "true"
 
 # --- UPDATED QUEUE NAMES ---
 INCOMING_QUEUE = "route-planning"
@@ -147,6 +154,10 @@ class RosCircuitBreaker:
         self.opened_at = None
         self._half_open_probe = False
 
+    def is_open(self):
+        """True while calls are being rejected. Has no side effects (never claims the half-open probe)."""
+        return self.opened_at is not None and (monotonic() - self.opened_at) < self.open_seconds
+
     def allow_call(self):
         if self.opened_at is None:
             return True
@@ -183,9 +194,10 @@ ros_breaker = RosCircuitBreaker()
 
 
 async def start_consumer():
-    """Connects to RabbitMQ and starts the main consumer loop."""
+    """Connects to RabbitMQ and runs the consumer loop forever, reconnecting after any failure."""
     print("Attempting to connect to RabbitMQ...")
     while True:
+        connection = None
         try:
             connection = pika.BlockingConnection(pika.URLParameters(RABBITMQ_URI))
             channel = connection.channel()
@@ -197,7 +209,8 @@ async def start_consumer():
             for method_frame, properties, body in channel.consume(
                     INCOMING_QUEUE, inactivity_timeout=1):
                 if method_frame is None:
-                    if not ros_breaker.allow_call():
+                    # Idle tick: only look at the breaker, never claim its half-open probe here.
+                    if ros_breaker.is_open():
                         channel.cancel()
                         await asyncio.sleep(min(ros_breaker.remaining_open_seconds(), 5))
                         break
@@ -205,6 +218,7 @@ async def start_consumer():
                 try:
                     await process_message(channel, method_frame, properties, body)
                 except CircuitOpenError:
+                    # ROS is unavailable: hand the message back and stop consuming until the circuit may close.
                     release_dedup(order_data_from_body(body))
                     channel.basic_nack(
                         delivery_tag=method_frame.delivery_tag, requeue=True)
@@ -216,9 +230,22 @@ async def start_consumer():
                     print(f"Error processing message: {e}")
                     channel.basic_nack(delivery_tag=method_frame.delivery_tag, requeue=False)
 
-        except pika.exceptions.AMQPConnectionError:
-            print("Connection to RabbitMQ failed. Retrying in 5 seconds...")
+        except Exception as exc:
+            print(f"RabbitMQ consumer error ({type(exc).__name__}: {exc}). Retrying in 5 seconds...")
             await asyncio.sleep(5)
+        finally:
+            close_connection(connection)
+
+
+def close_connection(connection):
+    """Closes a broker connection without ever raising (it may already be broken)."""
+    if connection is None:
+        return
+    try:
+        if connection.is_open:
+            connection.close()
+    except Exception as exc:
+        print(f"Ignoring error while closing RabbitMQ connection: {exc}")
 
 
 async def process_message(channel, method_frame, properties, body):
@@ -271,7 +298,7 @@ async def process_message(channel, method_frame, properties, body):
         }
     }
 
-    if "[FAIL_ROUTE]" in str(order_data.get("deliveryAddress", "")):
+    if chaos_hooks_enabled() and "[FAIL_ROUTE]" in str(order_data.get("deliveryAddress", "")):
         traceparent = emit_zipkin_span(
             "ros-integration",
             "ros.route.failed",
@@ -297,6 +324,9 @@ async def process_message(channel, method_frame, properties, body):
 
     try:
         route_data = await call_ros_with_fallback(ros_payload)
+    except CircuitOpenError:
+        # Not a routing failure: the consumer loop requeues the message instead of failing (and refunding) the order.
+        raise
     except Exception as exc:
         traceparent = emit_zipkin_span(
             "ros-integration",
@@ -400,16 +430,35 @@ def order_data_from_body(body):
         return None
 
 
-def acquire_dedup(dedup_key):
+def acquire_dedup(dedup_key, stale_after=None):
+    """Claims dedup_key for this attempt.
+
+    Returns False for a genuine duplicate. A row still in PROCESSING after `stale_after` seconds was
+    left behind by an attempt that crashed before finishing, so the redelivery may take it over.
+    """
+    stale_after = DEDUP_STALE_SECONDS if stale_after is None else stale_after
     with dedup_lock:
+        now = int(time.time())
         try:
             dedup_connection.execute(
                 "INSERT INTO processed_orders (dedup_key, status, created_at) VALUES (?, ?, ?)",
-                (dedup_key, "PROCESSING", int(time.time())),
+                (dedup_key, "PROCESSING", now),
             )
             dedup_connection.commit()
             return True
         except sqlite3.IntegrityError:
+            row = dedup_connection.execute(
+                "SELECT status, created_at FROM processed_orders WHERE dedup_key = ?",
+                (dedup_key,),
+            ).fetchone()
+            if row and row[0] == "PROCESSING" and (row[1] or 0) < now - stale_after:
+                dedup_connection.execute(
+                    "UPDATE processed_orders SET created_at = ? WHERE dedup_key = ? AND status = 'PROCESSING'",
+                    (now, dedup_key),
+                )
+                dedup_connection.commit()
+                print(f"Reclaimed stale PROCESSING dedup entry {dedup_key}")
+                return True
             return False
 
 
@@ -481,6 +530,11 @@ async def call_ros_with_fallback(payload):
         else:
             print(f"ROS unavailable; using local route heuristic: {exc}")
         return local_route_heuristic(payload)
+    except Exception:
+        # Unexpected failure (e.g. malformed ROS response): still settle the half-open probe so the
+        # breaker cannot be left waiting forever, then let the caller treat it as a routing failure.
+        ros_breaker.record_failure()
+        raise
 
 
 def local_route_heuristic(payload):

@@ -1,495 +1,355 @@
-# SwiftLogistics - Middleware Architecture
+# SwiftLogistics — Middleware Architecture
 
-## Table of Contents
-1. [Overview](#overview)
-2. [System Architecture](#system-architecture)
-3. [Component Details](#component-details)
-4. [Data Flow](#data-flow)
-5. [Integration Patterns](#integration-patterns)
-6. [Technology Stack](#technology-stack)
-7. [Messaging Architecture](#messaging-architecture)
-8. [Database Design](#database-design)
-9. [API Specifications](#api-specifications)
-10. [Deployment Architecture](#deployment-architecture)
+This document describes the system as implemented in this repository. Where something is a demo
+stand-in rather than a production component, it says so.
 
-## Overview
+## Contents
 
-SwiftLogistics is a comprehensive middleware architecture designed to integrate three disparate legacy systems:
-- **CMS (Customer Management System)** - SOAP/XML based
-- **ROS (Route Optimization System)** - REST API based  
-- **WMS (Warehouse Management System)** - TCP/IP messaging based
+1. [System overview](#1-system-overview)
+2. [Components](#2-components)
+3. [Order lifecycle](#3-order-lifecycle)
+4. [Messaging topology](#4-messaging-topology)
+5. [Reliability patterns](#5-reliability-patterns)
+6. [Real-time channels](#6-real-time-channels)
+7. [Security](#7-security)
+8. [Data model](#8-data-model)
+9. [REST API](#9-rest-api)
+10. [Observability and discovery](#10-observability-and-discovery)
+11. [Deployment](#11-deployment)
+12. [Configuration](#12-configuration)
+13. [Testing and CI](#13-testing-and-ci)
+14. [Known limitations](#14-known-limitations)
 
-The architecture implements an event-driven microservices pattern using message queues to ensure loose coupling, scalability, and fault tolerance across the integrated systems.
+---
 
-## System Architecture
+## 1. System overview
 
-### High-Level Architecture Diagram
+SwiftLogistics integrates modern web clients with three heterogeneous back-office systems, each
+speaking a different protocol, through an event-driven orchestrator.
 
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Client Portal │    │   Driver App    │    │  Admin Portal   │
-│   (React SPA)   │    │  (React PWA)    │    │   (Future)      │
-└─────────┬───────┘    └─────────┬───────┘    └─────────────────┘
-          │                      │
-          └──────────┬───────────┘
-                     │
-          ┌──────────▼───────────┐
-          │    Load Balancer     │
-          │     (Nginx)          │
-          └──────────┬───────────┘
-                     │
-          ┌──────────▼───────────┐
-          │   Orchestrator API   │
-          │   (Spring Boot)      │
-          │     Port: 8000       │
-          └──────────┬───────────┘
-                     │
-          ┌──────────▼───────────┐
-          │     RabbitMQ         │
-          │  Message Broker      │
-          │   Ports: 5672/15672  │
-          └─────┬────┬────┬──────┘
-                │    │    │
-        ┌───────▼─┐ ┌▼────▼──┐ ┌─▼──────────┐
-        │CMS      │ │ROS     │ │WMS         │
-        │Adapter  │ │Integr. │ │Adapter     │
-        │Port:8001│ │Port:8004│ │Port:8003   │
-        └───┬─────┘ └────┬───┘ └─┬──────────┘
-            │            │       │
-        ┌───▼─────┐ ┌────▼───┐ ┌─▼──────────┐
-        │Legacy   │ │ROS     │ │Legacy      │
-        │CMS      │ │Server  │ │WMS         │
-        │(SOAP)   │ │(REST)  │ │(TCP/IP)    │
-        └─────────┘ └────────┘ └────────────┘
-```
+```mermaid
+flowchart LR
+    subgraph Clients
+        CP["Client Portal :3000<br/>React 19"]
+        DA["Driver App :3001<br/>React 19"]
+    end
 
-### Core Architectural Principles
+    subgraph Core["Core"]
+        ORC["Orchestrator :8000 (host 8000 and 8080)<br/>Spring Boot 3.2 / Java 21"]
+        MDB[("MongoDB 7<br/>replica set rs0")]
+        RMQ{{"RabbitMQ 3.12"}}
+    end
 
-1. **Event-Driven Architecture**: All inter-service communication happens through asynchronous messaging
-2. **Microservices Pattern**: Each system integration is handled by a dedicated adapter service
-3. **Loose Coupling**: Services communicate only through well-defined message contracts
-4. **Fault Tolerance**: Message queues provide durability and retry mechanisms
-5. **Scalability**: Each service can be scaled independently based on load
+    subgraph Adapters["Adapters (protocol translation)"]
+        CMSA["CMS Adapter :8001<br/>Spring Boot"]
+        WMSA["WMS Adapter :8003<br/>Python"]
+        ROSA["ROS Integration :8004<br/>Python / FastAPI"]
+    end
 
-## Component Details
+    subgraph Legacy["Legacy systems (mocks)"]
+        CMS["CMS mock :5001<br/>SOAP / XML"]
+        WMS["WMS mock :9000<br/>TCP line protocol"]
+        ROS["ROS mock :3001<br/>REST / JSON"]
+    end
 
-### 1. Orchestrator Service (Spring Boot)
-**Location**: `services/orchestrator/`
-**Port**: 8000
-**Responsibilities**:
-- Central coordination of order lifecycle
-- RESTful API for client applications
-- Message routing and transformation
-- Order state management
-- Real-time updates via Server-Sent Events (SSE)
-- Driver assignment and management
-
-**Key Features**:
-- MongoDB integration for persistent storage
-- RabbitMQ message publishing/consuming
-- JWT-based authentication (planned)
-- Comprehensive logging and monitoring
-
-### 2. CMS Adapter Service (Spring Boot)
-**Location**: `services/cms-adapter/`
-**Port**: 8001
-**Responsibilities**:
-- SOAP to REST protocol translation
-- Order creation and customer management
-- Billing integration
-- Legacy CMS system integration
-
-**Integration Pattern**:
-```
-REST API ←→ CMS Adapter ←→ SOAP/XML ←→ Legacy CMS
+    CP -- "REST + JWT, SSE" --> ORC
+    DA -- "REST + JWT, STOMP over WebSocket" --> ORC
+    ORC <--> MDB
+    ORC <--> RMQ
+    RMQ <--> CMSA
+    RMQ <--> WMSA
+    RMQ <--> ROSA
+    CMSA -- SOAP --> CMS
+    WMSA -- TCP --> WMS
+    ROSA -- HTTP --> ROS
 ```
 
-### 3. ROS Integration Service (FastAPI/Python)
-**Location**: `services/ros-integration/`
-**Port**: 8004
-**Responsibilities**:
-- Route optimization requests
-- Geographic waypoint processing
-- Integration with route planning algorithms
-- Real-time route updates
+The orchestrator never calls a legacy system directly. It writes commands to a transactional outbox;
+a relay publishes them to RabbitMQ; adapters translate them to SOAP, TCP or REST and publish the
+results back. The orchestrator advances (or compensates) the order from those results.
 
-**Message Flow**:
-1. Consumes `route-requests` from queue
-2. Calls ROS mock server for optimization
-3. Publishes optimized routes to `route-updates` queue
+The WMS and ROS mocks run inside their adapter containers (`wms-adapter`, `ros-integration`); the CMS
+mock is its own container (`cms`, from `legacy/cms`).
 
-### 4. WMS Adapter Service (FastAPI/Python)
-**Location**: `services/wms-adapter/`
-**Port**: 8003
-**Responsibilities**:
-- TCP/IP to REST protocol conversion
-- Warehouse inventory tracking
-- Package status updates
-- Custom message parsing for legacy WMS
+## 2. Components
 
-**Protocol Translation**:
-```
-REST/JSON ←→ WMS Adapter ←→ TCP/IP Messages ←→ Legacy WMS
-```
+| Component | Tech | Port(s) | Responsibility | Health |
+|---|---|---|---|---|
+| `services/orchestrator` | Spring Boot 3.2.5, Java 21 | 8000 (host 8000 and 8080) | REST API, saga orchestration, outbox relay, SSE and STOMP, JWT security | `GET /api/v1/orders/health` |
+| `services/cms-adapter` | Spring Boot 3.5, Java 21 | 8001 | AMQP ⇄ SOAP for billing and refunds; Resilience4j circuit breaker | `GET /health` |
+| `services/wms-adapter` | Python 3.11, pika, FastAPI | 8003 (mock TCP server on 9000, in-container) | AMQP ⇄ TCP for packaging and release | `GET /health` |
+| `services/ros-integration` | Python 3.11, pika, FastAPI | 8004 (mock REST on 3001, in-container) | AMQP ⇄ REST for route planning and driver selection | `GET /health` |
+| `legacy/cms` | Spring Boot, Spring-WS | 5001 | Mock legacy billing SOAP service | TCP port check |
+| `ui/client-portal` | React 19, Leaflet | 3000 | Customer dashboard, live tracking, Ops console | — |
+| `ui/driver-app` | React 19, STOMP.js, Leaflet | 3001 | Courier HUD, telemetry, proof of delivery | — |
+| Infrastructure | MongoDB 7, RabbitMQ 3.12, Consul 1.18, Zipkin | 27017, 5672/15672, 8500, 9411 | Storage, messaging, discovery, tracing | healthchecks in compose |
 
-### 5. Client Portal (React SPA)
-**Location**: `ui/client-portal/`
-**Port**: 3000
-**Features**:
-- Order submission and tracking
-- Real-time status updates via SSE
-- Customer dashboard
-- Responsive design for multiple devices
+## 3. Order lifecycle
 
-### 6. Driver Application (React PWA)
-**Location**: `ui/driver-app/`
-**Port**: 3001
-**Features**:
-- Route visualization
-- Delivery status updates
-- Offline capability (PWA)
-- Mobile-first design
+### 3.1 Happy path
 
-## Data Flow
+```mermaid
+sequenceDiagram
+    participant C as Client Portal
+    participant O as Orchestrator
+    participant Q as RabbitMQ
+    participant CMS as CMS adapter -> SOAP
+    participant W as WMS adapter -> TCP
+    participant R as ROS adapter -> REST
+    participant D as Driver App
 
-### Order Processing Flow
-
-```
-1. Order Creation
-   Client Portal → Orchestrator API → MongoDB
-                                   ↓
-                            RabbitMQ (order-events)
-                                   ↓
-                            CMS Adapter → Legacy CMS
-                                   ↓
-                            Billing Update → Orchestrator
-
-2. Route Planning
-   Orchestrator → RabbitMQ (route-requests)
-                           ↓
-                    ROS Integration → ROS Server
-                           ↓
-                    RabbitMQ (route-updates)
-                           ↓
-                    Orchestrator → Driver Assignment
-
-3. Warehouse Processing
-   WMS System → TCP Messages → WMS Adapter
-                                    ↓
-                            RabbitMQ (warehouse-updates)
-                                    ↓
-                            Orchestrator → Status Update
-
-4. Real-time Updates
-   Orchestrator → SSE → Client Portal
-                    → SSE → Driver App
+    C->>O: POST /orders (Idempotency-Key)
+    O->>O: save order NEW + outbox row (one transaction)
+    O->>Q: order-created
+    Q->>CMS: bill order
+    CMS->>Q: billing-updates BILLED
+    Q->>O: BILLED, queue warehouse request
+    O->>Q: warehouse-queue
+    Q->>W: package order
+    W->>Q: warehouse-updates READY
+    Q->>O: READY, queue route request
+    O->>Q: route-planning
+    Q->>R: plan route and pick a driver
+    R->>Q: route-updates ROUTED
+    Q->>O: ROUTED, driver assigned
+    O-->>D: STOMP dispatch
+    D->>O: PUT start, POST proof of delivery
+    O-->>C: SSE status updates
 ```
 
-### Message Queue Architecture
+### 3.2 Order status state machine
 
-**Queue Configuration**:
-```
-order-events       → CMS Adapter consumption
-route-requests     → ROS Integration consumption  
-route-updates      → Orchestrator consumption
-warehouse-updates  → Orchestrator consumption
-billing-updates    → Orchestrator consumption
-driver-updates     → Driver App notifications
-```
+All status changes go through `OrderStateMachine`; any other change is logged and ignored, so late,
+duplicated or out-of-order messages cannot move an order backwards.
 
-## Integration Patterns
+| From | Allowed next statuses |
+|---|---|
+| `NEW` | `BILLING_PENDING`, `BILLED`, `BILLING_FAILED` |
+| `BILLING_PENDING` | `BILLED`, `BILLING_FAILED` |
+| `BILLED` | `PROCESSING`, `READY`, `WAREHOUSE_FAILED` |
+| `PROCESSING` | `READY`, `WAREHOUSE_FAILED` |
+| `READY` | `ROUTING`, `ROUTED`, `ROUTE_FAILED` |
+| `ROUTING` | `ROUTED`, `ROUTE_FAILED` |
+| `ROUTED` | `ASSIGNED`, `IN_TRANSIT`, `DELIVERED`, `FAILED` |
+| `ASSIGNED` | `IN_TRANSIT`, `DELIVERED`, `FAILED` |
+| `IN_TRANSIT` | `DELIVERED`, `FAILED` |
+| `WAREHOUSE_FAILED` | `COMPENSATING_BILLING` |
+| `ROUTE_FAILED` | `COMPENSATING_WAREHOUSE` |
+| `COMPENSATING_WAREHOUSE` | `COMPENSATING_BILLING` |
+| `COMPENSATING_BILLING` | `CANCELLED_REFUNDED` |
+| `BILLING_FAILED`, `DELIVERED`, `FAILED`, `CANCELLED`, `CANCELLED_REFUNDED` | none (terminal) |
 
-### 1. Protocol Translation Pattern
-Each adapter service implements protocol translation:
-- **CMS Adapter**: REST ↔ SOAP/XML
-- **WMS Adapter**: REST ↔ TCP/IP
-- **ROS Integration**: Message Queue ↔ REST
+`ASSIGNED` and `CANCELLED` exist in the enum but nothing currently sets them; routing moves an order
+straight to `ROUTED` with its driver attached.
 
-### 2. Event Sourcing Pattern
-All state changes are captured as events in RabbitMQ queues, providing:
-- Audit trail
-- Replay capability  
-- Debugging support
-- System recovery
+### 3.3 Compensation (saga rollback)
 
-### 3. CQRS (Command Query Responsibility Segregation)
-- **Commands**: Handled through message queues
-- **Queries**: Direct API calls to Orchestrator
-- **Read Models**: Optimized for UI consumption
+| Failure | What happens |
+|---|---|
+| CMS unreachable after retries, or SOAP fault | The CMS adapter publishes `FAILED`; the order becomes `BILLING_FAILED` (terminal; nothing to refund). |
+| WMS reports `FAILED`, or packaging retries are exhausted | `WAREHOUSE_FAILED` → `COMPENSATING_BILLING`; the orchestrator asks the CMS to refund → `CANCELLED_REFUNDED`. |
+| ROS reports `FAILED` | In one transaction: `ROUTE_FAILED`, the event is logged, `COMPENSATING_WAREHOUSE`, and a package-release command is queued. The WMS acknowledges → `COMPENSATING_BILLING` → refund → `CANCELLED_REFUNDED`. |
+| Delivery fails (driver reports `FAILED`) | Terminal `FAILED`; no automatic refund. |
 
-## Technology Stack
+The demo trigger for the route-failure path is a delivery address containing `[FAIL_ROUTE]` (see
+`ENABLE_CHAOS_HOOKS`).
 
-| Component | Technology | Version | Purpose |
-|-----------|------------|---------|---------|
-| **Backend Services** |
-| Orchestrator | Spring Boot | 3.2+ | Main coordination service |
-| CMS Adapter | Spring Boot | 3.2+ | SOAP integration |
-| ROS Integration | FastAPI | 0.104+ | Python-based route service |
-| WMS Adapter | FastAPI | 0.104+ | TCP/IP integration |
-| **Message Broker** |
-| RabbitMQ | Docker | 3.12-management | Async messaging |
-| **Database** |
-| MongoDB | Docker | 7.0+ | Document storage |
-| **Frontend** |
-| Client Portal | React | 18+ | Customer interface |
-| Driver App | React PWA | 18+ | Driver interface |
-| **Infrastructure** |
-| Docker | Containerization | 24+ | Service deployment |
-| Docker Compose | Orchestration | 2.21+ | Multi-container apps |
+### 3.4 Driver lifecycle
 
-## Messaging Architecture
+Routing reserves the chosen driver (`isAvailable = false`, status `ASSIGNED`); starting a delivery
+sets `BUSY`; finishing the driver's last active order sets `AVAILABLE` again. Starting, completing or
+submitting proof for an order in the wrong state returns `409`.
 
-### RabbitMQ Configuration
+## 4. Messaging topology
 
-**Exchanges**:
-- `swift.direct` - Direct routing for specific services
-- `swift.topic` - Topic-based routing for broadcast messages
+All exchanges are durable **direct** exchanges. Every main queue dead-letters to
+`<exchange>.dlx` with routing key `<queue>.dlq`, and a durable `<queue>.dlq` queue is bound there.
 
-**Queues and Routing**:
-```yaml
-Queues:
-  order-events:
-    routing-key: "order.created"
-    consumer: cms-adapter
-    
-  route-requests:
-    routing-key: "route.optimize"
-    consumer: ros-integration
-    
-  route-updates:
-    routing-key: "route.completed"  
-    consumer: orchestrator
-    
-  warehouse-updates:
-    routing-key: "warehouse.*"
-    consumer: orchestrator
-    
-  billing-updates:
-    routing-key: "billing.processed"
-    consumer: orchestrator
-```
+| Queue | Exchange | Routing key | Producer → Consumer |
+|---|---|---|---|
+| `order-created` | `order-created.exchange` | `order.created` | Orchestrator outbox → CMS adapter |
+| `billing-updates` | `billing-updates.exchange` | `billing.updated` | CMS adapter → Orchestrator |
+| `billing-compensation` | `billing-updates.exchange` | `billing.compensation` | Orchestrator outbox → CMS adapter |
+| `billing-rollback` | `billing-updates.exchange` | `billing.rollback` | unused legacy queue (a listener remains) |
+| `warehouse-queue` | `warehouse.exchange` | `warehouse.request` | Orchestrator outbox → WMS adapter |
+| `warehouse-updates` | `warehouse.exchange` | `warehouse.update` | WMS adapter → Orchestrator |
+| `warehouse-compensation` | `warehouse.exchange` | `warehouse.compensation` | Orchestrator outbox → WMS adapter |
+| `route-planning` | `route.exchange` | `route.planning` | Orchestrator outbox → ROS adapter |
+| `route-updates` | `route.exchange` | `route.update` | ROS adapter → Orchestrator |
 
-### Message Formats
+The Python adapters publish their results straight to the named queue through the default exchange.
 
-**Order Event Message**:
-```json
-{
-  "eventId": "uuid",
-  "eventType": "ORDER_CREATED",
-  "orderId": "order-uuid", 
-  "customerId": "customer-uuid",
-  "timestamp": "2025-09-21T10:30:00Z",
-  "data": {
-    "deliveryAddress": "123 Main St",
-    "city": "Colombo",
-    "postalCode": "10100",
-    "country": "Sri Lanka"
-  }
-}
-```
+Messages are JSON. Common headers: `X-Correlation-Id` and W3C `traceparent`.
 
-**Route Update Message**:
-```json
-{
-  "orderId": "order-uuid",
-  "status": "ROUTED",
-  "waypoints": ["Colombo", "Kottawa", "Kadawatha"],
-  "driverId": "driver-uuid",
-  "vehicleId": "vehicle-123",
-  "timestamp": "2025-09-21T10:35:00Z"
-}
-```
+| Message | Key fields |
+|---|---|
+| order created | `orderId`, `customerId`, `customerName`, `customerEmail`, address fields, `totalAmount` |
+| billing update | `messageId`, `orderId`, `status` (`BILLED`, `FAILED`, `PENDING`, `BILLING_REFUNDED`, `CANCELLED_REFUNDED`), `billedAmount` |
+| warehouse request | `orderId`, `customerId`, address fields, `totalAmount`, `status: BILLED` |
+| warehouse update | `messageId`, `orderId`, `status` (`PROCESSING`, `READY`, `FAILED`, `PACKAGE_RELEASED`) |
+| route request | `messageId`, `orderId`, address fields |
+| route update | `messageId`, `orderId`, `status` (`ROUTING`, `ROUTED`, `FAILED`), `waypoints`, `driverId`, `vehicleId` |
+| compensation commands | `messageId`, `orderId`, `reason` |
 
-## Database Design
+## 5. Reliability patterns
 
-### MongoDB Collections
+**Transactional outbox.** The order and its outgoing command are saved in one MongoDB transaction
+(`orders` + `outbox_events`). `OutboxRelayScheduler` publishes pending rows every second with
+publisher confirms, retrying up to five times before marking a row `FAILED`. Delivery is
+at-least-once, so consumers deduplicate. The relay is skipped when `app.outbox.relay.enabled=false`.
 
-**Orders Collection**:
-```javascript
-{
-  _id: ObjectId,
-  orderId: String (UUID),
-  customerId: String (UUID),
-  deliveryAddress: String,
-  city: String,
-  postalCode: String,
-  country: String,
-  status: Enum [CREATED, BILLED, ROUTED, IN_TRANSIT, DELIVERED],
-  createdAt: DateTime,
-  updatedAt: DateTime,
-  driverId: String (UUID),
-  routeId: String (UUID),
-  billedAt: DateTime,
-  packageReadyAt: DateTime,
-  routedAt: DateTime
-}
-```
+**Idempotent API.** `POST /orders` requires an `Idempotency-Key`. Repeating a key returns the original
+order (only to a caller allowed to see it). Keys expire after 24 hours.
 
-**Drivers Collection**:
-```javascript
-{
-  _id: ObjectId,
-  driverName: String,
-  vehicleId: String,
-  isAvailable: Boolean,
-  type: Enum [bike, van, truck],
-  password: String (hashed),
-  currentLocation: {
-    latitude: Number,
-    longitude: Number
-  }
-}
-```
+**Idempotent consumers.**
 
-**Customers Collection**:
-```javascript
-{
-  _id: ObjectId,
-  customerId: String (UUID),
-  name: String,
-  email: String,
-  phone: String,
-  address: {
-    street: String,
-    city: String,
-    postalCode: String,
-    country: String
-  }
-}
-```
+| Consumer | Store | Key |
+|---|---|---|
+| Orchestrator | `processed_messages` (24 h TTL) | `orderId:KIND:STATUS` |
+| CMS adapter | `processed_messages` in MongoDB | `orderId:CMS_BILLING`, `orderId:CMS_REFUND` |
+| WMS adapter | SQLite (WAL) | `orderId:WMS_PACKAGING`, `orderId:WMS_COMPENSATION` |
+| ROS adapter | SQLite (WAL) | `orderId:ROS_ROUTING` |
 
-## API Specifications
+A SQLite row left in `PROCESSING` by a crashed attempt is reclaimed after 60 seconds
+(`DEDUP_STALE_SECONDS`), so a redelivered message is not discarded as a duplicate forever.
 
-### Orchestrator REST API
+**CMS adapter (SOAP).** Resilience4j circuit breaker (window 10, at least 5 calls, 50 % failures, 30 s
+open) with a 4 s time limit. Transport failures and timeouts are retried 4 times (1 s, 2 s, 4 s
+back-off); when attempts run out a `FAILED` billing update is published and the message acknowledged.
+Permanent SOAP failures fail immediately. While the circuit is open a message is held for 5 s
+(`cms.circuit-open-requeue-delay-ms`) before being requeued, so the consumer does not spin; the order
+simply waits and continues when the CMS returns. Failed messages dead-letter instead of requeueing
+forever.
 
-**Base URL**: `http://localhost:8000/api/v1`
+**ROS adapter (REST).** A circuit breaker (5 failures, 30 s open, single half-open probe) pauses
+consumption and requeues messages while open instead of failing orders. If the ROS cannot be reached
+the adapter falls back to a local heuristic route (waypoints `[Colombo, zone, city]`) and still
+reports `ROUTED`.
 
-**Endpoints**:
+**WMS adapter (TCP).** A single shared socket guarded by a lock; newline-framed messages with a
+receive buffer so frames split across TCP segments are reassembled; a listener that reconnects with
+back-off after any disconnect; supervised consumer threads. When packaging retries are exhausted
+(or the failure is permanent) it reports `FAILED` to the orchestrator before dead-lettering the
+message.
 
-| Method | Endpoint | Description | Request Body |
-|--------|----------|-------------|--------------|
-| POST | `/orders` | Create new order | Order details |
-| GET | `/orders` | List all orders | Query params |
-| GET | `/orders/{id}` | Get order by ID | - |
-| PUT | `/orders/{id}/status` | Update order status | Status object |
-| GET | `/drivers` | List available drivers | - |
-| POST | `/drivers/{id}/assign` | Assign driver to order | Assignment data |
-| GET | `/events/stream` | SSE event stream | - |
+**Dead-letter recovery.** `POST /api/v1/recovery/replay?queue=<name>.dlq&limit=n` (customer or admin
+token) moves up to 100 messages back to their source queue.
 
-**Example API Calls**:
+## 6. Real-time channels
 
-```bash
-# Create Order
-curl -X POST http://localhost:8000/api/v1/orders \
-  -H "Content-Type: application/json" \
-  -d '{
-    "customerId": "cust-123",
-    "deliveryAddress": "123 Main Street",
-    "city": "Colombo",
-    "postalCode": "10100",
-    "country": "Sri Lanka"
-  }'
+| Channel | Endpoint | Direction | Notes |
+|---|---|---|---|
+| Server-Sent Events | `GET /sse/order/{orderId}` | server → client | events `order-update`, `location-update`; one emitter per order; the client reconnects with back-off |
+| STOMP over WebSocket | `/ws` | both | application prefix `/app`; the driver app publishes to `/app/telemetry` |
+| Driver dispatch | `/topic/drivers/{driverId}/dispatch` | server → driver | route result for a newly assigned order |
+| Driver location | `/topic/drivers/{driverId}/location` | server → subscribers | telemetry echo |
+| Order location | `/topic/orders/{orderId}/location` | server → subscribers | also pushed over SSE |
 
-# Get Order Status  
-curl http://localhost:8000/api/v1/orders/order-uuid
+Browsers cannot attach an `Authorization` header to `EventSource` or WebSocket handshakes, so
+`/sse/**` and `/ws/**` are intentionally outside JWT enforcement.
 
-# Stream Real-time Updates
-curl -N http://localhost:8000/api/v1/events/stream
-```
+## 7. Security
 
-## Deployment Architecture
+- Passwords are stored as BCrypt hashes. Legacy plain-text values are upgraded at first login.
+- Login returns an HMAC-SHA256 JWT (24 h) with `sub` (user id), `email` and `role` (`CUSTOMER` or
+  `DRIVER`; `ADMIN` is honoured but nothing issues it yet).
+- `app.security.require-jwt` (env `REQUIRE_JWT`, **default `true`**) requires a bearer token for
+  `/api/v1/orders/**`, `/api/v1/drivers/**` and `/api/v1/recovery/**`.
+- Open paths: `/api/v1/auth/**`, `/api/v1/orders/health`, Swagger, `/actuator/**`, `/sse/**`, `/ws/**`.
+- Ownership is enforced from the token: a customer sees only their own orders and events; a driver
+  only their assigned orders and may only act on those; DLQ replay is for customers and admins.
+- Sign-up accepts only whitelisted fields, generates ids server-side and rejects names or emails that
+  would collide with another account's login. Login failures are indistinguishable.
+- Requests are validated (`totalAmount > 0`, required address, proof images capped at 2,000,000
+  characters). Errors are JSON: `{"message": "..."}`, with an `errors` map for field validation.
+- Set `JWT_SECRET` for anything beyond a demo; the built-in default is public.
 
-### Docker Composition
+## 8. Data model
 
-The system deploys as a multi-container Docker application:
+| Collection | Purpose |
+|---|---|
+| `orders` | Order, status, billing fields, driver/route ids, proof of delivery (indexed on `status` and `customerId + createdAt`) |
+| `customers`, `drivers` | Accounts (drivers also carry `isAvailable` and `status`) |
+| `routes` | Waypoints of a planned route |
+| `events` | Audit trail per order |
+| `outbox_events` | Pending/published/failed outgoing messages |
+| `processed_messages` | Consumer deduplication (24 h TTL) |
+| `idempotency_keys` | API idempotency (24 h TTL) |
 
-**Service Dependencies**:
-```
-┌─────────────┐
-│  RabbitMQ   │ ← Health Check Required
-└──────┬──────┘
-       │
-   ┌───▼────┐ ┌──────────┐ ┌───────────┐ ┌─────────────┐
-   │Orchest.│ │CMS Adapt.│ │ROS Integr.│ │WMS Adapter  │
-   └────────┘ └──────────┘ └───────────┘ └─────────────┘
-```
+## 9. REST API
 
-**Network Configuration**:
-- All services run on `swift-network` bridge network
-- External ports exposed only for API endpoints and UI
-- Internal service discovery via container names
+Base path `/api/v1`. Interactive documentation: `/swagger-ui.html`.
 
-**Volume Management**:
-- `rabbitmq_data`: Persistent message storage
-- `orchestrator_logs`: Centralized logging
-- `mongo_data`: Database persistence
+| Method | Path | Who |
+|---|---|---|
+| `POST` | `/auth/customer`, `/auth/driver` | anyone |
+| `POST` | `/auth/sign-up`, `/auth/driver-sign-up` | anyone |
+| `POST` | `/auth/driver-logout` | anyone (marks the driver unavailable) |
+| `POST` | `/orders` (header `Idempotency-Key`) | customer, admin |
+| `GET` | `/orders/{id}`, `/orders/{id}/events` | the order's customer or driver, admin |
+| `GET` | `/orders/customer/{customerId}` | that customer, admin |
+| `GET` | `/orders/health` | anyone |
+| `GET` | `/drivers/driver/{driverId}` | that driver, admin |
+| `GET` | `/drivers/orders/{orderId}` | the assigned driver, admin |
+| `PUT` | `/drivers/driver/start/{orderId}`, `/drivers/driver/complete/{orderId}` | the assigned driver, admin |
+| `POST` | `/drivers/driver/{driverId}/orders/{orderId}/pod` | that driver, admin |
+| `POST` | `/recovery/replay?queue=&limit=` | customer, admin |
 
-### Environment Configuration
+## 10. Observability and discovery
 
-**Required Environment Variables**:
+- Every request and message carries `X-Correlation-Id`; the orchestrator, CMS adapter and both Python
+  adapters propagate it and the W3C `traceparent` header, and export spans to Zipkin (`:9411`).
+  The WMS leg is TCP, so its context is kept in the adapter and the span is emitted by the adapter.
+- Services register with Consul (`:8500`). The WMS and ROS adapters discover their mock back-ends
+  through Consul and fall back to configured addresses; the CMS adapter uses a fixed SOAP address
+  (`http://cms-mock-service:5001/ws`).
+- Actuator `health` and `info` are exposed by the Spring services.
 
-```bash
-# RabbitMQ Configuration
-RABBITMQ_DEFAULT_USER=admin
-RABBITMQ_DEFAULT_PASS=admin123
+## 11. Deployment
 
-# MongoDB Configuration  
-MONGODB_URI=mongodb://mongo:27017/swiftlogistics
-MONGODB_DATABASE=swiftlogistics
+`infra/docker-compose.yml` runs everything on the `swift-network` bridge. See
+[infra/README.md](../infra/README.md) for commands, ports, volumes and health checks.
 
-# Service URLs
-CMS_ADAPTER_URL=http://cms-adapter:8001
-ROS_INTEGRATION_URL=http://ros-integration:8004
-WMS_ADAPTER_URL=http://wms-adapter:8003
+Start order is enforced with healthchecks: MongoDB, RabbitMQ and Consul first; then the orchestrator
+and adapters (the CMS adapter also waits for the CMS mock); the two UIs wait for the orchestrator.
 
-# Application Configuration
-SPRING_PROFILES_ACTIVE=docker
-SERVER_PORT=8000
-```
+## 12. Configuration
 
-### Build and Deployment Process
+| Variable | Service | Purpose |
+|---|---|---|
+| `MONGODB_URI` / `MONGO_URI` | orchestrator, CMS adapter / ROS | MongoDB connection |
+| `RABBITMQ_HOST`, `RABBITMQ_PORT`, `RABBITMQ_USERNAME`, `RABBITMQ_PASSWORD` | all | broker connection (the Python adapters use `RABBITMQ_USER` / `RABBITMQ_PASS`) |
+| `CONSUL_HOST`, `CONSUL_PORT` | all | service registry |
+| `REQUIRE_JWT` | orchestrator | enforce bearer tokens (default `true`) |
+| `JWT_SECRET`, `JWT_EXPIRATION_MS` | orchestrator | token signing key and lifetime |
+| `app.cors.allowed-origins` | orchestrator | browser origins allowed to call the API |
+| `ENABLE_CHAOS_HOOKS` | ROS adapter | honour the `[FAIL_ROUTE]` demo trigger (default `true`) |
+| `DEDUP_DB_PATH`, `DEDUP_STALE_SECONDS` | WMS and ROS adapters | SQLite dedup file and stale-row threshold |
+| `cms.circuit-open-requeue-delay-ms` | CMS adapter | hold time before requeueing while the circuit is open |
+| `REACT_APP_API_BASE_URL`, `REACT_APP_WS_URL` | UIs | **build-time** API and WebSocket URLs (compose build arguments) |
 
-**Step 1: Infrastructure Setup**
-```bash
-cd infra
-docker-compose build
-docker-compose up -d
-```
+## 13. Testing and CI
 
-**Step 2: Service Health Verification**
-```bash
-# Check RabbitMQ
-curl http://localhost:15672
+| Suite | Command | Notes |
+|---|---|---|
+| Orchestrator | `mvn test` in `services/orchestrator` | includes the Spring context test under the hermetic `test` profile |
+| CMS adapter | `mvn test` in `services/cms-adapter` | includes the retry / recover proxy test |
+| Legacy CMS | `mvn test` in `legacy/cms` | |
+| WMS adapter | `python -m unittest discover -s services/wms-adapter/test` | real-socket tests included |
+| ROS integration | `python -m unittest discover -s services/ros-integration/test` | |
+| Client Portal / Driver App | `npm test -- --watchAll=false` in `ui/*` | `CI=true npm run build` treats lint warnings as errors |
 
-# Check Orchestrator API
-curl http://localhost:8000/api/v1/health
+The hermetic `test` profile points MongoDB at an unreachable address, disables seeding, the outbox
+relay, Consul and listener start-up, and tests assert this, so running the suite can never touch a
+real database or broker. GitHub Actions (`.github/workflows/ci.yml`) runs all suites, the frontend
+builds with `CI=true`, and validates the compose file.
 
-# Check Individual Services
-curl http://localhost:8001/health  # CMS Adapter
-curl http://localhost:8003/health  # WMS Adapter  
-curl http://localhost:8004/health  # ROS Integration
-```
+## 14. Known limitations
 
-**Step 3: Access Applications**
-- Client Portal: http://localhost:3000
-- Driver App: http://localhost:3001
-- RabbitMQ Management: http://localhost:15672
-
-### Monitoring and Observability
-
-**Health Checks**:
-- All services implement `/health` endpoints
-- Docker health checks configured for critical services
-- RabbitMQ diagnostics for message broker status
-
-**Logging Strategy**:
-- Structured JSON logging across all services
-- Centralized log aggregation (planned: ELK stack)
-- Request/response logging with correlation IDs
-
-**Metrics Collection**:
-- Application metrics via Spring Boot Actuator
-- Message queue metrics from RabbitMQ Management
-- Custom business metrics for order processing
-
-This architecture provides a robust, scalable foundation for integrating disparate legacy systems while maintaining modern development practices and operational excellence.
+- The legacy systems are mocks: the CMS always bills successfully, the WMS never reports a failure,
+  and the ROS mock always answers.
+- The server keeps one SSE emitter per order, so a second viewer of the same order replaces the first.
+- The WMS TCP protocol has no acknowledgement; an update received while RabbitMQ is down is lost.
+- Without a reachable ROS the adapter reports a heuristic route as `ROUTED`.
+- A failed delivery is terminal and is not refunded automatically.
+- `billing-rollback` is a leftover queue with no producer.

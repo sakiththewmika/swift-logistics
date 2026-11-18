@@ -1,196 +1,204 @@
-# SwiftLogistics — Enterprise Distributed Logistics Middleware Platform
+# SwiftLogistics — Distributed Logistics Middleware Platform
 
 [![CI Pipeline](https://github.com/sakiththewmika/swift-logistics/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/sakiththewmika/swift-logistics/actions/workflows/ci.yml)
 ![Java 21](https://img.shields.io/badge/Java-21-orange?logo=openjdk)
-![Spring Boot 3.2](https://img.shields.io/badge/Spring_Boot-3.2.5-brightgreen?logo=springboot)
-![React 19](https://img.shields.io/badge/React-19.1.1-61DAFB?logo=react)
+![Spring Boot](https://img.shields.io/badge/Spring_Boot-3.2%20%7C%203.5-brightgreen?logo=springboot)
+![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react)
 ![Python 3.11](https://img.shields.io/badge/Python-3.11-blue?logo=python)
 ![RabbitMQ](https://img.shields.io/badge/RabbitMQ-3.12-FF6600?logo=rabbitmq)
 ![MongoDB](https://img.shields.io/badge/MongoDB-7.0-green?logo=mongodb)
 ![Consul](https://img.shields.io/badge/Consul-1.18-crimson?logo=consul)
 ![Zipkin](https://img.shields.io/badge/Zipkin-Distributed_Tracing-blueviolet)
 
-An enterprise-grade, event-driven polyglot distributed middleware platform bridging modern real-time SaaS frontends with heterogeneous legacy enterprise systems (**SOAP/XML**, **TCP/IP Socket Streams**, and **RESTful microservices**).
+An event-driven middleware that connects two modern web front-ends with three legacy back-office
+systems that each speak a different protocol: **SOAP/XML** (billing), **raw TCP** (warehouse) and
+**REST** (route optimisation). The legacy systems are mocks bundled with the project.
 
-Built to demonstrate resilient architectural design patterns under real-world logistics conditions: **Transactional Outbox**, **Saga Orchestration with Compensation**, **Resilience4j Circuit Breakers**, **Consul Service Discovery**, **OpenTelemetry Distributed Tracing**, **Consumer Idempotency**, and **Bi-Directional STOMP/SSE Telematics**.
+It demonstrates the **transactional outbox**, a **saga with compensation**, **circuit breakers**,
+**consumer idempotency**, **service discovery**, **distributed tracing** and **real-time telematics**.
+
+For the full design see [docs/architecture.md](docs/architecture.md); for running and operating the
+stack see [infra/README.md](infra/README.md).
 
 ---
 
-## 🏛️ System Architecture
+## System architecture
 
 ```mermaid
 flowchart TD
-    subgraph Frontend["Modern Frontend Tier (React 19)"]
-        CP["Client Portal (:3000)<br/>• Split-View Command Center<br/>• KPI Ribbon & Toast System<br/>• Live SSE Order Tracking<br/>• Interactive Leaflet Map"]
-        DA["Driver App (:3001)<br/>• Guided 3-Step Delivery HUD<br/>• STOMP WebSocket Telematics<br/>• Route GPS Drive Simulator<br/>• HTML5 Signature & Photo POD"]
+    subgraph Frontend["Front-ends (React 19)"]
+        CP["Client Portal (:3000)<br/>order dashboard, live map, Ops console"]
+        DA["Driver App (:3001)<br/>delivery HUD, telemetry, proof of delivery"]
     end
 
-    subgraph Middleware["Distributed Middleware Tier"]
-        GW["Swift Orchestrator (:8080 host / :8000 container)<br/>• Spring Boot 3.2.5 & Java 21<br/>• BCrypt Hashing & JWT Bearer Auth<br/>• Swagger / OpenAPI 3.0 Console<br/>• Saga Transaction Orchestrator<br/>• Transactional Outbox Relayer<br/>• STOMP Broker & SSE Dispatcher"]
-        
-        RMQ["RabbitMQ Event Broker (:5672 / :15672)<br/>• Topic Exchange: order-exchange<br/>• Routing Keys & Dead-Letter Queues (order.dlq)<br/>• Correlated Publisher Confirms"]
-        
-        CSL["HashiCorp Consul (:8500)<br/>Dynamic Service Registry & Health Checks"]
-        ZPK["OpenZipkin (:9411)<br/>Distributed Tracing with W3C Context Propagation"]
-        MDB[("MongoDB 7 Replica Set (:27017)<br/>• Orders & Outbox Collections<br/>• Compound Performance Indexes<br/>• 24h TTL Idempotency Keys")]
+    subgraph Middleware["Middleware"]
+        ORC["Orchestrator (:8000 container, host 8000 and 8080)<br/>REST, saga, outbox relay, SSE, STOMP, JWT"]
+        RMQ["RabbitMQ (:5672 / :15672)<br/>direct exchanges + dead-letter queues"]
+        CSL["Consul (:8500)"]
+        ZPK["Zipkin (:9411)"]
+        MDB[("MongoDB 7 replica set (:27017)")]
     end
 
-    subgraph Adapters["Integration Adapters & Legacy Backends"]
-        CMSA["CMS Adapter (:8001)<br/>Spring Boot SOAP Client"]
-        LCMS["Legacy CMS mock (inside cms-adapter, :5001)<br/>SOAP / XML Invoicing"]
-
-        ROSA["ROS Integration (:8004)<br/>FastAPI / Python Client"]
-        LROS["ROS mock (inside ros-integration)<br/>REST Routing Engine"]
-
-        WMSA["WMS Adapter (:8003)<br/>Python TCP Socket Client & Dedup"]
-        LWMS["WMS mock (inside wms-adapter, :9000)<br/>Raw TCP/IP Frame Socket"]
+    subgraph Adapters["Adapters"]
+        CMSA["CMS Adapter (:8001)<br/>Spring Boot, SOAP client"]
+        WMSA["WMS Adapter (:8003)<br/>Python, TCP client"]
+        ROSA["ROS Integration (:8004)<br/>Python / FastAPI, REST client"]
     end
 
-    CP -- "REST (JWT) / SSE" --> GW
-    DA -- "REST (JWT) / STOMP WS" --> GW
+    subgraph Legacy["Legacy systems (mocks)"]
+        LCMS["CMS mock (:5001)<br/>own container, legacy/cms"]
+        LWMS["WMS mock (:9000)<br/>inside the wms-adapter container"]
+        LROS["ROS mock (:3001)<br/>inside the ros-integration container"]
+    end
 
-    GW <--> MDB
-    GW <--> RMQ
-    GW -. Heartbeat .-> CSL
-    GW -. Spans .-> ZPK
-
+    CP -- "REST (JWT) / SSE" --> ORC
+    DA -- "REST (JWT) / STOMP at /ws" --> ORC
+    ORC <--> MDB
+    ORC <--> RMQ
+    ORC -. register .-> CSL
+    ORC -. spans .-> ZPK
     RMQ <--> CMSA
-    CMSA -- "SOAP / XML" --> LCMS
-
-    RMQ <--> ROSA
-    ROSA -- "REST JSON" --> LROS
-
     RMQ <--> WMSA
-    WMSA -- "TCP Raw Stream" --> LWMS
+    RMQ <--> ROSA
+    CMSA -- "SOAP / XML" --> LCMS
+    WMSA -- "TCP lines" --> LWMS
+    ROSA -- "REST JSON" --> LROS
 ```
 
----
+## Order lifecycle
 
-## 🎯 7 Enterprise Architectural Patterns
+`NEW → BILLED → (PROCESSING) → READY → (ROUTING) → ROUTED → IN_TRANSIT → DELIVERED`
 
-| # | Enterprise Pattern | Implementation Details in SwiftLogistics |
-|---|-------------------|------------------------------------------|
-| **1** | **Transactional Outbox** | Writes order state mutations and outbox records atomically within a single MongoDB multi-document transaction (`@Transactional`). A scheduled relayer daemon asynchronously publishes events to RabbitMQ with publisher confirms, eliminating distributed dual-write inconsistency. |
-| **2** | **Saga Orchestration & Compensation** | Centralized Saga orchestrator managing forward progression (`CREATED` $\rightarrow$ `BILLED` $\rightarrow$ `PACKED` $\rightarrow$ `ROUTED` $\rightarrow$ `IN_TRANSIT` $\rightarrow$ `DELIVERED`). On downstream service timeout or failure, the Saga automatically emits compensating rollback commands (`BILLING_COMPENSATION_REQUESTED`, `ORDER_CANCELLED_REFUNDED`). |
-| **3** | **Resilience4j Circuit Breaker & Fallback** | Wraps fragile legacy SOAP and TCP calls with configurable thresholds (`failureRateThreshold=50%`, `slidingWindowSize=10`, `waitDurationInOpenState=10s`). Trips open under legacy downtime and serves graceful fallbacks to maintain system availability. |
-| **4** | **Consul Service Discovery & Heartbeats** | Microservices dynamically register with HashiCorp Consul on boot. Actuator `/actuator/health` heartbeats run every 10s. Downstream clients resolve service instances dynamically without hardcoded IPs. |
-| **5** | **Distributed Tracing (OpenTelemetry / Zipkin)** | Injects and extracts W3C `traceparent` headers across HTTP requests, AMQP message headers, and raw socket protocols. Complete end-to-end trace waterfalls are inspectable in the OpenZipkin UI. |
-| **6** | **Consumer Idempotency & De-Duplication** | Protects endpoints via `Idempotency-Key` headers stored in MongoDB with 24-hour TTL expiration. Downstream adapter consumers maintain an SQLite WAL dedup cache, discarding redundant AMQP deliveries. |
-| **7** | **STOMP WebSockets & SSE Telematics** | Bidirectional courier GPS coordinate ingestion over STOMP WebSocket (`/ws/driver`) paired with unidirectional Server-Sent Events (`/sse/order/{orderId}`) streaming live telematics directly to the Client Portal's Leaflet maps with zero page reload. |
+Failure paths:
 
----
+- billing fails → `BILLING_FAILED`
+- warehouse fails → `WAREHOUSE_FAILED → COMPENSATING_BILLING → CANCELLED_REFUNDED`
+- routing fails → `ROUTE_FAILED → COMPENSATING_WAREHOUSE → COMPENSATING_BILLING → CANCELLED_REFUNDED`
+- delivery fails → `FAILED`
 
-## 🔐 Security & OpenAPI Specifications
+A state machine rejects any other change, so late or duplicated messages cannot move an order backwards.
 
-- **BCrypt Password Hashing**: Passwords stored as salted BCrypt hashes (`$2a$10$...`) with transparent runtime migration for legacy records.
-- **Stateless JWT Bearer Authentication**: HMAC-SHA256 tokens issued with 24-hour validity, encoding `sub` (User ID), `email`, and `role` (`CUSTOMER`, `DRIVER`).
-- **Interactive OpenAPI 3.0 / Swagger UI**: Direct API exploration and JWT-authorized endpoint execution available at [`http://localhost:8080/swagger-ui.html`](http://localhost:8080/swagger-ui.html).
-- **Compound & TTL Database Indexes**:
-  - `outbox_status_created_idx` on `outbox_events` (`{'status': 1, 'createdAt': 1}`) for rapid publisher polling.
-  - `order_customer_created_idx` on `orders` (`{'customerId': 1, 'createdAt': -1}`) for fast dashboard listing.
-  - 86,400s (24h) TTL expiration on `idempotency_keys` and `processed_messages`.
+## Enterprise patterns
 
----
+| # | Pattern | Implementation |
+|---|---|---|
+| 1 | **Transactional outbox** | The order and its outgoing command are saved in one MongoDB transaction; a relay publishes pending rows to RabbitMQ with publisher confirms, so a crash can never lose or invent a message. |
+| 2 | **Saga with compensation** | The orchestrator advances an order from each adapter's reply and, on failure, issues compensating commands (release the warehouse package, refund billing). Route-failure compensation is committed atomically with the failure itself. |
+| 3 | **Circuit breakers and retries** | CMS adapter: Resilience4j (window 10, ≥ 5 calls, 50 % failures, **30 s** open) plus 4 retries and a recover step that fails billing instead of leaving an order in `NEW`. ROS adapter: its own breaker (5 failures, 30 s open) that pauses consumption. WMS adapter: retries, reconnect and back-off (the TCP leg has no breaker). |
+| 4 | **Service discovery** | Services register with Consul; the WMS and ROS adapters discover their mock back-ends through it and fall back to configured addresses. The CMS adapter uses a fixed address. |
+| 5 | **Distributed tracing** | `X-Correlation-Id` and W3C `traceparent` travel over HTTP and AMQP headers and spans go to Zipkin. The TCP warehouse leg cannot carry headers, so the adapter keeps the context and emits that span itself. |
+| 6 | **Idempotency** | `POST /orders` requires an `Idempotency-Key` (24 h TTL). Consumers deduplicate in MongoDB (orchestrator, CMS adapter) or SQLite (WMS, ROS); a row stuck in `PROCESSING` after a crash is reclaimed after 60 s. |
+| 7 | **Real-time channels** | Server-Sent Events at `/sse/order/{orderId}` for customers and STOMP over WebSocket at **`/ws`** for the driver app's telemetry and dispatch. |
+| 8 | **Dead-letter recovery** | Every queue has a `<queue>.dlq` (via `<exchange>.dlx`); `POST /api/v1/recovery/replay` re-queues messages. |
 
-## 🚀 Quick Start (Docker Compose)
+## Security
 
-### Prerequisites
-- **Docker Engine** (24.0+) & **Docker Compose v2**
-- Host ports available: `3000`, `3001`, `5001`, `5672`, `8001`, `8003`, `8004`, `8080`, `8500`, `9411`, `15672`, `27017`
+- **BCrypt** password hashes (legacy plain-text values are upgraded at first login).
+- **JWT bearer tokens** (HMAC-SHA256, 24 h) carrying `sub`, `email` and `role` (`CUSTOMER` / `DRIVER`).
+- **Enforced by default** (`REQUIRE_JWT=true`) on orders, drivers and recovery routes, with per-resource
+  ownership checks: customers see only their own orders, drivers only their assigned ones.
+- `/sse/**` and `/ws/**` are intentionally open because browsers cannot add an `Authorization` header to
+  `EventSource` or WebSocket handshakes.
+- Sign-up accepts only whitelisted fields, so it can never overwrite another account; request bodies are validated.
+- Errors are JSON (`{"message": "..."}`).
+- Set `JWT_SECRET` in any deployment beyond a local demo.
+- **Swagger UI:** [http://localhost:8080/swagger-ui.html](http://localhost:8080/swagger-ui.html).
 
-### 1. Launch the Complete Ecosystem
+## Quick start (Docker Compose)
+
+Prerequisites: Docker Engine 24+ with Compose v2, and these free host ports:
+`3000`, `3001`, `5001`, `5672`, `8000`, `8001`, `8003`, `8004`, `8080`, `8500`, `9411`, `15672`, `27017`.
+
 ```bash
-# Clone the repository
 git clone https://github.com/sakiththewmika/swift-logistics.git
-cd swift-logistics
-
-# Start all containers in detached mode
-cd infra
+cd swift-logistics/infra
 docker compose up --build -d
+docker compose ps          # wait until the services report (healthy)
 ```
 
-### 2. Verify Container Health
+The first build downloads Maven and npm dependencies and takes several minutes. Reset to a clean demo
+database at any time with `docker compose down -v`.
+
+## Demo accounts and ports
+
+| Role | URL | Username / email | Password |
+|---|---|---|---|
+| Customer | [http://localhost:3000](http://localhost:3000) | `client@swift.lk` or `merchant@swift.lk` | `password123` |
+| Driver | [http://localhost:3001](http://localhost:3001) | `driver1@swift.lk` or `driver2@swift.lk` | `password123` |
+| RabbitMQ admin | [http://localhost:15672](http://localhost:15672) | `guest` | `guest` |
+
+| Service | Technology | Port | Purpose |
+|---|---|---|---|
+| Client Portal | React 19, Leaflet | 3000 | Customer dashboard, KPIs, live tracking |
+| Driver App | React 19, STOMP | 3001 | Courier HUD, GPS simulator, proof of delivery |
+| Orchestrator | Spring Boot 3.2 | 8000 and 8080 (both map to container port 8000) | API, saga, outbox, SSE, STOMP |
+| CMS Adapter | Spring Boot 3.5 | 8001 | AMQP ⇄ SOAP |
+| WMS Adapter | Python, threads + pika | 8003 | AMQP ⇄ TCP |
+| ROS Integration | Python, FastAPI | 8004 | AMQP ⇄ REST |
+| CMS mock (`cms`) | Spring-WS | 5001 | Legacy billing SOAP service |
+| Consul | HashiCorp | 8500 | Service catalog |
+| Zipkin | OpenZipkin | 9411 | Trace UI |
+| RabbitMQ | 3.12 | 5672 / 15672 | Broker / management UI |
+| MongoDB | 7, replica set `rs0` | 27017 (localhost only) | Datastore |
+
+## Interactive demo
+
+1. Open the **Client Portal** and sign in (the *Fill Demo Customer* button helps).
+2. Click **Middleware Ops & Chaos** to open the console (it signs in as the demo customer if nobody is):
+   - **Scenario A — Launch Happy Path:** creates an express order and walks it through the saga.
+   - **Scenario B — Test Duplicate Guard:** sends two concurrent requests with the same idempotency key
+     and shows that only one order is created.
+   - **Scenario C — Run Rollback Test:** the address contains `[FAIL_ROUTE]`, so route planning fails and the
+     saga releases the warehouse package and refunds billing, ending in `CANCELLED_REFUNDED`.
+   - **Dead-Letter Queue (DLQ) Replay:** re-queues messages from a chosen `<queue>.dlq`.
+3. Open the **Driver App**, sign in as `driver1@swift.lk`:
+   - **1. Start Delivery Trip (Mark In-Transit & Launch GPS)** starts the GPS simulator; the truck moves on
+     both the Driver App and the Client Portal map.
+   - **2. Complete Delivery (Capture Signature & Photo)** opens the proof-of-delivery form; a signature is required.
+4. Open **Zipkin** at [http://localhost:9411](http://localhost:9411) and run a query to see the cross-service traces.
+
+The `[FAIL_ROUTE]` trigger is controlled by `ENABLE_CHAOS_HOOKS` on the ROS adapter (default `true`);
+set it to `false` to disable demo failure injection.
+
+## Development and testing
+
+Everything can run in containers, which avoids installing Java, Python or Node locally:
+
 ```bash
-docker compose ps
-```
-Wait ~30 seconds for MongoDB replica set initialization and Consul service registrations to report healthy.
+# Java suites (JDK 21)
+docker run --rm -v "$PWD/services/orchestrator":/app -w /app maven:3.9.9-eclipse-temurin-21 mvn -B test
+docker run --rm -v "$PWD/services/cms-adapter":/app -w /app maven:3.9.9-eclipse-temurin-21 mvn -B test
+docker run --rm -v "$PWD/legacy/cms":/app -w /app maven:3.9.9-eclipse-temurin-21 mvn -B test
 
----
+# Python suites (3.11)
+docker run --rm -e DEDUP_DB_PATH=:memory: -e PYTHONDONTWRITEBYTECODE=1 -v "$PWD":/repo:ro -w /repo python:3.11-slim sh -c '
+  python -m unittest discover -s services/wms-adapter/test -p "test_*.py" &&
+  python -m unittest discover -s services/ros-integration/test -p "test_*.py"'
 
-## 🔑 Demo Accounts & Port Reference
-
-### Ready-to-Use Demo Credentials
-| Role | Portal URL | Username / Email | Password |
-|------|------------|------------------|----------|
-| **Client / Customer** | [http://localhost:3000](http://localhost:3000) | `client@swift.lk` or `merchant@swift.lk` | `password123` |
-| **Courier / Driver** | [http://localhost:3001](http://localhost:3001) | `driver1@swift.lk` or `driver2@swift.lk` | `password123` |
-| **RabbitMQ Admin** | [http://localhost:15672](http://localhost:15672) | `guest` | `guest` |
-
-### Infrastructure & Service Ports
-| Service | Technology | Port | Purpose / Dashboard |
-|---------|------------|------|---------------------|
-| **Client Portal** | React 19 / Leaflet | **3000** | Customer dashboard, KPI ribbon & live order tracking |
-| **Driver App** | React 19 / STOMP | **3001** | Courier HUD, GPS telematics simulator & POD capture |
-| **Swift Orchestrator** | Spring Boot 3.2.5 | **8080 host / 8000 container** | Core API, Saga orchestrator, WebSocket & Outbox |
-| **Swagger UI** | SpringDoc OpenAPI 3 | **8080** | [`http://localhost:8080/swagger-ui.html`](http://localhost:8080/swagger-ui.html) |
-| **HashiCorp Consul** | Go / Consul UI | **8500 / 8600 UDP** | Service discovery catalog, health monitoring & DNS |
-| **OpenZipkin** | Zipkin UI | **9411** | Distributed trace waterfall visualization |
-| **RabbitMQ** | Erlang / AMQP | **5672 / 15672** | AMQP broker and management UI for queues, bindings, exchanges & DLQs |
-| **MongoDB** | MongoDB 7 Replica Set (`rs0`) | **27017** | Document datastore with replica set transactions |
-| **CMS Adapter** | Spring Boot / JAXB | **8001** | SOAP $\leftrightarrow$ AMQP mediation |
-| **WMS Adapter** | Python Asyncio | **8003** | TCP socket $\leftrightarrow$ AMQP warehouse adapter |
-| **ROS Integration** | FastAPI / Python | **8004** | REST $\leftrightarrow$ AMQP route optimization adapter |
-| **Legacy CMS mock (`cms`)** | Spring Boot SOAP | **5001** | Simulated legacy billing engine |
-| **WMS mock** | Python TCP server inside `wms-adapter` | **9000 internal** | Simulated legacy warehouse TCP socket |
-
----
-
-## 🧪 Interactive Architecture Demonstration
-
-1. **Launch the Client Portal** at [`http://localhost:3000`](http://localhost:3000) and sign in.
-2. Click **"Middleware Ops & Chaos Console"** in the top navigation bar to test live distributed patterns:
-   - **1-Click Happy Path**: Creates an Express order and streams live state updates (`CREATED` $\rightarrow$ `BILLED` $\rightarrow$ `PACKED` $\rightarrow$ `ROUTED` $\rightarrow$ `DISPATCHED`).
-   - **Concurrent Idempotency Attack**: Dispatches twin requests with matching `Idempotency-Key` headers to prove exactly-once database persistence.
-   - **DLQ Message Replay**: Re-queues dead-lettered messages from `order.dlq` directly back into the live exchange.
-3. **Open the Driver App** at [`http://localhost:3001`](http://localhost:3001):
-   - Click **"1. Start Delivery Trip (Mark In-Transit)"** to activate the live GPS drive simulator.
-   - Watch the delivery truck move in real time across the Leaflet map on **both** the Driver App and the Client Portal simultaneously via STOMP WebSocket & SSE!
-   - Capture an HTML5 touchscreen signature & parcel photo in **"2. Complete Delivery"** to finalize the order.
-4. **Inspect Distributed Traces**:
-   - Open OpenZipkin at [`http://localhost:9411`](http://localhost:9411) and click **"Run Query"** to view cross-service spans traversing Spring Boot, RabbitMQ AMQP, and legacy adapters.
-
----
-
-## 🛠️ Local Development & Testing
-
-### Backend Unit & Integration Tests (Java 21)
-```bash
-# Orchestrator compilation & tests
-mvn clean test --file services/orchestrator/pom.xml
-
-# CMS Adapter
-mvn clean test-compile --file services/cms-adapter/pom.xml
+# Front-ends (the build treats lint warnings as errors when CI=true)
+docker run --rm -v "$PWD/ui/client-portal":/app -w /app -e CI=true node:20-slim sh -c 'npm ci && npm run build && npm test -- --watchAll=false'
+docker run --rm -v "$PWD/ui/driver-app":/app -w /app -e CI=true node:20-slim sh -c 'npm ci && npm run build && npm test -- --watchAll=false'
 ```
 
-### Python Services Lint & Syntax Checks (Python 3.11)
-```bash
-python -m compileall services/wms-adapter services/ros-integration
-python -m unittest discover -s services/wms-adapter/test -p "test_*.py"
-```
+With a local toolchain, run `./mvnw test` in each Java project, `python -m unittest discover -s <service>/test`
+for the Python services, and `npm test` / `npm run build` in each UI.
 
-### Frontend Production Builds (Node 20 / React 19)
-```bash
-npm --prefix ui/client-portal run build
-npm --prefix ui/driver-app run build
-```
+The Spring context tests run under a hermetic `test` profile (no database, broker or registry), so the
+suites are safe to run anywhere. The same suites run in CI (`.github/workflows/ci.yml`).
 
-### Clean Teardown
-```bash
-cd infra
-docker compose down -v
-```
+## Repository layout
 
----
+| Path | Contents |
+|---|---|
+| `services/orchestrator` | Core API and saga ([README](services/orchestrator/README.md)) |
+| `services/cms-adapter` | SOAP adapter ([README](services/cms-adapter/README.md)) |
+| `services/wms-adapter` | TCP adapter and WMS mock ([README](services/wms-adapter/README.md)) |
+| `services/ros-integration` | REST adapter and ROS mock ([README](services/ros-integration/README.md)) |
+| `legacy/cms` | Mock legacy billing SOAP service ([README](legacy/cms/README.md)) |
+| `ui/client-portal`, `ui/driver-app` | React front-ends ([client](ui/client-portal/README.md), [driver](ui/driver-app/README.md)) |
+| `infra` | Docker Compose stack ([README](infra/README.md)) |
+| `docs` | [Architecture](docs/architecture.md) |
 
-## 📄 License
-This project is licensed under the Apache 2.0 License - see the [LICENSE](LICENSE) file for details.
+## License
+
+Licensed under the Apache License, Version 2.0 — see [LICENSE](LICENSE).

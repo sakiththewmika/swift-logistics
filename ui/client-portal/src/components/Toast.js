@@ -2,10 +2,12 @@ import React, { useEffect } from 'react';
 import { CheckCircle, AlertCircle, Info, X } from 'lucide-react';
 
 const Toast = ({ toasts, onDismiss }) => {
-  if (!toasts || toasts.length === 0) return null;
-
+  // Always rendered: screen readers only announce changes to a live region that already exists.
   return (
     <div
+      role="status"
+      aria-live="polite"
+      aria-atomic="false"
       style={{
         position: 'fixed',
         bottom: 24,
@@ -18,7 +20,7 @@ const Toast = ({ toasts, onDismiss }) => {
         pointerEvents: 'none',
       }}
     >
-      {toasts.map((toast) => (
+      {(toasts || []).map((toast) => (
         <ToastItem key={toast.id} toast={toast} onDismiss={onDismiss} />
       ))}
     </div>

@@ -92,14 +92,28 @@ const formatStatus = (status) => {
     .replace(/\b\w/g, (l) => l.toUpperCase());
 };
 
+// Orders in these statuses will not change again, so they need no live polling. COMPENSATING_* statuses
+// are not terminal: the saga still has steps to finish.
+const TERMINAL_STATUSES = [
+  'DELIVERED',
+  'COMPLETED',
+  'FAILED',
+  'CANCELLED_REFUNDED',
+  'BILLING_FAILED',
+  'WAREHOUSE_FAILED',
+  'ROUTE_FAILED',
+];
+
+const SEEDED_NOTIFICATIONS = [
+  { id: 1, message: 'Order ORD-COL-1001 is out for delivery in Colombo', time: '10m ago', read: false },
+  { id: 2, message: 'Order ORD-COL-1002 has completed proof of delivery', time: '1h ago', read: true },
+];
+
 const ClientPortal = () => {
   const { customer, isAuthenticated, getCustomerId, signout } = useAuth();
   const [orders, setOrders] = useState([]);
   const [selectedOrder, setSelectedOrder] = useState(null);
-  const [notifications, setNotifications] = useState([
-    { id: 1, message: 'Order ORD-COL-1001 is out for delivery in Colombo', time: '10m ago', read: false },
-    { id: 2, message: 'Order ORD-COL-1002 has completed proof of delivery', time: '1h ago', read: true },
-  ]);
+  const [notifications, setNotifications] = useState([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showCreateOrder, setShowCreateOrder] = useState(false);
   const [showSignIn, setShowSignIn] = useState(false);
@@ -179,30 +193,33 @@ const ClientPortal = () => {
   useEffect(() => {
     if (isAuthenticated) {
       fetchOrders();
+      // Seed the notification centre once per sign-in, never for anonymous visitors.
+      setNotifications((prev) => (prev.length ? prev : SEEDED_NOTIFICATIONS));
     } else {
       setOrders([]);
       setSelectedOrder(null);
+      setNotifications([]);
+      setShowNotifications(false);
       prevOrderStatusesRef.current = {};
     }
   }, [isAuthenticated, fetchOrders]);
 
-  // Zero-Refresh Live Auto-Sync: Poll every 4 seconds while any order is in non-terminal state
+  // Live auto-sync: poll every 4 seconds, but only while at least one order can still change.
+  // Depending on a boolean (not the orders array) keeps one steady interval instead of resetting it each poll.
+  const hasActiveOrders = useMemo(
+    () => orders.some((o) => !TERMINAL_STATUSES.includes(o.status?.toUpperCase() || '')),
+    [orders]
+  );
+
   useEffect(() => {
-    if (!isAuthenticated) return;
-
-    const hasActiveOrders = orders.some((o) => {
-      const s = o.status?.toUpperCase() || '';
-      return !['DELIVERED', 'COMPLETED', 'FAILED', 'CANCELLED_REFUNDED'].includes(s);
-    });
-
-    if (!hasActiveOrders && orders.length > 0) return;
+    if (!isAuthenticated || !hasActiveOrders) return undefined;
 
     const timer = setInterval(() => {
       fetchOrders();
     }, 4000);
 
     return () => clearInterval(timer);
-  }, [isAuthenticated, orders, fetchOrders]);
+  }, [isAuthenticated, hasActiveOrders, fetchOrders]);
 
   const handleCreateOrder = async (orderData) => {
     if (!isAuthenticated) {
@@ -248,10 +265,12 @@ const ClientPortal = () => {
         'NEW',
         'PENDING',
         'CREATED',
+        'BILLING_PENDING',
         'BILLED',
         'READY',
         'PACKED',
         'PROCESSING',
+        'ROUTING',
         'ROUTED',
         'DISPATCHED',
         'IN_TRANSIT',
@@ -334,6 +353,7 @@ const ClientPortal = () => {
             <div style={{ position: 'relative' }}>
               <NotificationBell
                 unreadCount={unreadCount}
+                expanded={showNotifications}
                 onClick={() => setShowNotifications(!showNotifications)}
               />
               {showNotifications && (
@@ -485,7 +505,7 @@ const ClientPortal = () => {
         </div>
 
         {/* Master-Detail Split-Screen Workspace */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(340px, 380px) 1fr', gap: 20 }}>
+        <div className="workspace-grid">
           {/* Left Column: Master List */}
           <div>
             <OrderList
@@ -495,7 +515,6 @@ const ClientPortal = () => {
               getStatusColor={getStatusColor}
               getStatusIcon={getStatusIcon}
               formatStatus={formatStatus}
-              onOrderUpdated={fetchOrders}
             />
           </div>
 
@@ -506,6 +525,7 @@ const ClientPortal = () => {
               getStatusColor={getStatusColor}
               getStatusIcon={getStatusIcon}
               formatStatus={formatStatus}
+              onOrderUpdated={fetchOrders}
             />
           </div>
         </div>
@@ -538,7 +558,6 @@ const ClientPortal = () => {
             fetchOrders();
             if (newOrder) setSelectedOrder(newOrder);
           }}
-          customerId={getCustomerId()}
         />
       )}
     </div>

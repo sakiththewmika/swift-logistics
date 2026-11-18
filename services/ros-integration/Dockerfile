@@ -1,5 +1,5 @@
 # Start with a lightweight official Python image
-FROM python:3.10-slim
+FROM python:3.11-slim
 
 # Set the working directory inside the container
 WORKDIR /app
@@ -16,7 +16,7 @@ COPY entrypoint.sh ./
 RUN chmod +x entrypoint.sh
 
 # Expose the port the app will run on
-EXPOSE 8002
+EXPOSE 8004
 
 # Set environment variables for production
 ENV PYTHONUNBUFFERED=1

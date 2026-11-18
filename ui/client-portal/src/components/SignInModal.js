@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import useModalA11y from '../hooks/useModalA11y';
 
 const SignInModal = ({ onClose }) => {
   const { signin } = useAuth();
@@ -7,6 +8,7 @@ const SignInModal = ({ onClose }) => {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const dialogRef = useModalA11y(onClose, { enabled: !loading });
 
   const handleFillDemo = () => {
     setUsername('client@swift.lk');
@@ -30,8 +32,15 @@ const SignInModal = ({ onClose }) => {
 
   return (
     <div className="modal-overlay">
-      <div className="modal">
-        <h2 style={{marginTop:0,marginBottom:18,fontWeight:600,fontSize:22,color:'#1e293b'}}>Sign In</h2>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="signin-title"
+        ref={dialogRef}
+        tabIndex={-1}
+      >
+        <h2 id="signin-title" style={{marginTop:0,marginBottom:18,fontWeight:600,fontSize:22,color:'#1e293b'}}>Sign In</h2>
         <form onSubmit={handleSubmit} className="create-order-form">
           <label>
             Username or email

@@ -1,4 +1,21 @@
 // Simple Network client using fetch with baseURL and optional port
+const SENSITIVE_KEYS = new Set(['password', 'confirmPassword', 'token', 'accessToken', 'authorization']);
+
+// Returns a copy that is safe to log: credentials and tokens are masked, never printed.
+const redact = (value, depth = 0) => {
+  if (value === null || value === undefined || depth > 5) return value;
+  if (Array.isArray(value)) return value.map((item) => redact(item, depth + 1));
+  if (typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, val]) => [
+        key,
+        SENSITIVE_KEYS.has(key.toLowerCase()) || SENSITIVE_KEYS.has(key) ? '[REDACTED]' : redact(val, depth + 1),
+      ])
+    );
+  }
+  return value;
+};
+
 class Network {
   constructor(baseURL, port) {
     this.baseURL = baseURL;
@@ -31,7 +48,7 @@ class Network {
     if (data && method.toUpperCase() !== 'GET') {
       options.body = typeof data === 'string' ? data : JSON.stringify(data);
     }
-    console.log(`Request: ${options.method} ${url}`, data || '');
+    console.log(`Request: ${options.method} ${url}`, redact(data) || '');
     let res;
     try {
       res = await fetch(url, options);
@@ -55,10 +72,10 @@ class Network {
       const err = new Error(json?.message || text || `${res.status} ${res.statusText}`);
       err.status = res.status;
       err.data = json || text;
-      console.log(`Response: ${res.status} ${res.statusText}`, err.data);
+      console.log(`Response: ${res.status} ${res.statusText}`, redact(err.data));
       throw err;
     }
-    console.log(`Response: ${res.status} ${res.statusText}`, json || text);
+    console.log(`Response: ${res.status} ${res.statusText}`, json ? redact(json) : '[non-JSON body]');
     return json;
   }
 

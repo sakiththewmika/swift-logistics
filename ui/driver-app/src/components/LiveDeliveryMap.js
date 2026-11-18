@@ -1,36 +1,9 @@
 import React, { useEffect, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Navigation } from 'lucide-react';
+import { WAREHOUSE_COORDS, resolveDestinationCoords, escapeHtml } from '../utils/geo';
 
-export const WAREHOUSE_COORDS = [6.9585, 79.8845]; // Peliyagoda Central Hub, Colombo
-
-export const resolveDestinationCoords = (address = '', city = '') => {
-  const text = `${address} ${city}`.toLowerCase();
-  if (text.includes('kandy') || text.includes('peradeniya')) {
-    return [7.2906, 80.6337];
-  }
-  if (text.includes('galle') || text.includes('rampart') || text.includes('fort rampart')) {
-    return [6.0535, 80.2210];
-  }
-  if (text.includes('bambalapitiya') || text.includes('colombo 04') || text.includes('colombo 4') || text.includes('bauddhaloka')) {
-    return [6.8905, 79.8587];
-  }
-  if (text.includes('cinnamon') || text.includes('colombo 07') || text.includes('colombo 7') || text.includes('ward place')) {
-    return [6.9080, 79.8690];
-  }
-  if (text.includes('fort') || text.includes('colombo 01') || text.includes('colombo 1') || text.includes('pettah')) {
-    return [6.9344, 79.8428];
-  }
-  if (text.includes('nugegoda') || text.includes('high level')) {
-    return [6.8649, 79.8997];
-  }
-  if (text.includes('dehiwala') || text.includes('mount lavinia')) {
-    return [6.8301, 79.8801];
-  }
-  // Default Colombo 03 / Kollupitiya / Galle Road
-  return [6.9022, 79.8518];
-};
+export { WAREHOUSE_COORDS, resolveDestinationCoords };
 
 const createWarehouseIcon = () =>
   L.divIcon({
@@ -113,11 +86,12 @@ const LiveDeliveryMap = ({
       center: WAREHOUSE_COORDS,
       zoom: 13,
       zoomControl: true,
-      attributionControl: false,
+      attributionControl: true,
     });
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors',
     }).addTo(map);
 
     const warehouseMarker = L.marker(WAREHOUSE_COORDS, {
@@ -136,7 +110,7 @@ const LiveDeliveryMap = ({
     destMarker.bindPopup(`
       <div style="font-family:sans-serif; font-size:12px; line-height:1.4;">
         <strong style="color:#ef4444;">📍 Next Drop-off Location</strong><br/>
-        ${destinationAddress || 'Colombo Delivery Address'}
+        ${escapeHtml(destinationAddress || 'Colombo Delivery Address')}
       </div>
     `);
     destMarkerRef.current = destMarker;
@@ -183,6 +157,8 @@ const LiveDeliveryMap = ({
         mapInstanceRef.current = null;
       }
     };
+    // The map is created once; address and position changes are applied by the effects below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -193,8 +169,8 @@ const LiveDeliveryMap = ({
     destMarkerRef.current.setPopupContent(`
       <div style="font-family:sans-serif; font-size:12px; line-height:1.4;">
         <strong style="color:#ef4444;">📍 Next Drop-off Location</strong><br/>
-        ${destinationAddress || 'Colombo Delivery Address'}<br/>
-        <span style="color:#64748b; font-size:11px;">${destinationCity || 'Colombo'}</span>
+        ${escapeHtml(destinationAddress || 'Colombo Delivery Address')}<br/>
+        <span style="color:#64748b; font-size:11px;">${escapeHtml(destinationCity || 'Colombo')}</span>
       </div>
     `);
     routeLineRef.current.setLatLngs([WAREHOUSE_COORDS, newDest]);

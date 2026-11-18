@@ -1,70 +1,56 @@
-# Getting Started with Create React App
+# Driver App
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+The courier's web app: sign in, see assigned deliveries, start a trip, stream GPS telemetry, and capture
+proof of delivery. React 19 (Create React App), STOMP.js, Leaflet. Served on port **3001**.
 
-## Available Scripts
+## Features
 
-In the project directory, you can run:
+- Driver sign in / sign up; the session stores the JWT and survives a refresh. Signing out marks the driver
+  unavailable on the server.
+- Guided flow: **1. Start Delivery Trip** (marks the order in transit and starts the GPS simulator) then
+  **2. Complete Delivery** (signature and optional photo) or **Report Failure** (with a reason).
+- Proof of delivery requires a drawn signature; the form resets for every order, reports server errors in
+  place, and cannot be submitted twice.
+- Telemetry over STOMP (`/ws`, destination `/app/telemetry`). While the route simulator runs, raw browser
+  geolocation is not published, so the customer's map never jumps between real and simulated positions.
+- The delivery list refreshes every 5 s and keeps its last known content if a refresh fails.
+- Responsive layout and keyboard-accessible dialogs.
 
-### `npm start`
+## Running
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+With the whole stack (recommended):
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+```bash
+cd ../../infra && docker compose up --build -d     # http://localhost:3001
+```
 
-### `npm test`
+Demo logins: `driver1@swift.lk` / `driver2@swift.lk`, password `password123` (the *Fill Demo Driver* button
+fills the first).
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+The API and WebSocket addresses are baked in at **build time** through the `REACT_APP_API_BASE_URL` and
+`REACT_APP_WS_URL` build arguments (defaults `http://localhost:8080/api/v1` and `ws://localhost:8080/ws`).
+For development with hot reload (Node 20): `npm ci && npm start` and copy `.env.example` to `.env`.
 
-### `npm run build`
+## Build and test
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+```bash
+docker run --rm -v "$PWD":/app -w /app -e CI=true node:20-slim \
+  sh -c 'npm ci && npm run build && npm test -- --watchAll=false'
+```
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+`CI=true` makes the build fail on any lint warning. Tests cover the proof-of-delivery modal (canvas
+signature, validation, per-order reset), the delivery flow (starting the chosen order, poll errors, GPS
+pause, logout) and the login/sign-up screens.
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+## Structure
 
-### `npm run eject`
-
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
-
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
-
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
-
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
-
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
-
-### Code Splitting
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+```
+src/
+  App.js                       dashboard, simulator, delivery actions
+  components/                  NextDeliveryCard, DeliveriesList, DeliveryItem, CurrentLocationCard,
+                               LiveDeliveryMap, ProofOfDeliveryModal, AuthPage, Login, SignUp
+  context/AuthContext.js       session state
+  hooks/useModalA11y.js        Escape handling and focus management for dialogs
+  network/                     fetch client, driver and auth endpoints, STOMP hook
+  utils/geo.js                 destination lookup and HTML escaping for map popups
+```

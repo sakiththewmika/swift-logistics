@@ -6,9 +6,8 @@ import {
   RotateCcw,
   FastForward,
   Activity,
-  MapPin,
 } from 'lucide-react';
-import LiveDeliveryMap, { WAREHOUSE_COORDS, resolveDestinationCoords } from './LiveDeliveryMap';
+import LiveDeliveryMap, { WAREHOUSE_COORDS } from './LiveDeliveryMap';
 import '../AppStyles.css';
 
 const CurrentLocationCard = ({
@@ -26,7 +25,6 @@ const CurrentLocationCard = ({
 }) => {
   const deliveryAddress = delivery?.deliveryAddress || '42 Galle Road, Colombo 03';
   const destinationCity = delivery?.city || delivery?.destinationCity;
-  const destinationCoords = resolveDestinationCoords(deliveryAddress, destinationCity);
   const activeOrderId = delivery?.id ?? delivery?.orderId;
 
   return (

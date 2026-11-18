@@ -12,13 +12,17 @@ import {
   X,
   Layers,
   Database,
-  Radio,
   BookOpen,
 } from 'lucide-react';
 import { orderEndpoints } from '../network/order';
+import { useAuth } from '../context/AuthContext';
+import useModalA11y from '../hooks/useModalA11y';
 
-const SystemOpsModal = ({ onClose, onOrderCreated, customerId = 'cust-001' }) => {
-  const activeCustomerId = customerId || 'cust-001';
+const DEMO_CUSTOMER = { username: 'client@swift.lk', password: 'password123' };
+
+const SystemOpsModal = ({ onClose, onOrderCreated }) => {
+  const { isAuthenticated, signin, getCustomerId } = useAuth();
+  const dialogRef = useModalA11y(onClose);
   const [activeTab, setActiveTab] = useState('scenarios'); // 'scenarios' | 'dlq' | 'infra'
   
   // Health status state
@@ -41,6 +45,26 @@ const SystemOpsModal = ({ onClose, onOrderCreated, customerId = 'cust-001' }) =>
   const [rollbackLoading, setRollbackLoading] = useState(false);
   const [rollbackResult, setRollbackResult] = useState(null);
 
+  // The API requires a JWT. When nobody is signed in, sign in as the demo customer first so each
+  // one-click scenario and the DLQ replay work straight away; signed-in users keep their own identity.
+  // Returns the customer id to act as, or null (after reporting the problem through `report`).
+  const startSession = async (report) => {
+    try {
+      if (isAuthenticated) {
+        return getCustomerId();
+      }
+      const customer = await signin(DEMO_CUSTOMER.username, DEMO_CUSTOMER.password);
+      return customer?.customerId ?? null;
+    } catch (err) {
+      report({
+        success: false,
+        error: `Could not sign in as the demo customer: ${err.message || 'sign-in failed'}`,
+        timestamp: new Date().toLocaleTimeString(),
+      });
+      return null;
+    }
+  };
+
   // Fetch health check on mount
   useEffect(() => {
     checkSystemHealth();
@@ -62,6 +86,10 @@ const SystemOpsModal = ({ onClose, onOrderCreated, customerId = 'cust-001' }) =>
   const handleReplayDlq = async () => {
     setReplayLoading(true);
     setReplayResult(null);
+    if (!(await startSession(setReplayResult))) {
+      setReplayLoading(false);
+      return;
+    }
     try {
       const res = await orderEndpoints.replayDlq(selectedQueue, replayLimit);
       setReplayResult({
@@ -86,6 +114,11 @@ const SystemOpsModal = ({ onClose, onOrderCreated, customerId = 'cust-001' }) =>
   const handleRunHappyPath = async () => {
     setHappyPathLoading(true);
     setHappyPathResult(null);
+    const activeCustomerId = await startSession(setHappyPathResult);
+    if (!activeCustomerId) {
+      setHappyPathLoading(false);
+      return;
+    }
     const idempotencyKey = `idem-express-${Date.now()}`;
     const payload = {
       customerId: activeCustomerId,
@@ -131,6 +164,11 @@ const SystemOpsModal = ({ onClose, onOrderCreated, customerId = 'cust-001' }) =>
   const handleRunIdempotencyTest = async () => {
     setIdempotencyLoading(true);
     setIdempotencyResult(null);
+    const activeCustomerId = await startSession(setIdempotencyResult);
+    if (!activeCustomerId) {
+      setIdempotencyLoading(false);
+      return;
+    }
     const duplicateKey = `idem-dup-test-${Date.now()}`;
     const payload = {
       customerId: activeCustomerId,
@@ -195,6 +233,11 @@ const SystemOpsModal = ({ onClose, onOrderCreated, customerId = 'cust-001' }) =>
   const handleRunRollbackTest = async () => {
     setRollbackLoading(true);
     setRollbackResult(null);
+    const activeCustomerId = await startSession(setRollbackResult);
+    if (!activeCustomerId) {
+      setRollbackLoading(false);
+      return;
+    }
     const idempotencyKey = `idem-rollback-${Date.now()}`;
     const payload = {
       customerId: activeCustomerId,
@@ -263,6 +306,11 @@ const SystemOpsModal = ({ onClose, onOrderCreated, customerId = 'cust-001' }) =>
           border: '1px solid #cbd5e1',
         }}
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="system-ops-title"
+        ref={dialogRef}
+        tabIndex={-1}
       >
         {/* Header */}
         <div
@@ -292,7 +340,7 @@ const SystemOpsModal = ({ onClose, onOrderCreated, customerId = 'cust-001' }) =>
               <Activity size={20} color="#38bdf8" />
             </div>
             <div>
-              <h2 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: '#f8fafc' }}>
+              <h2 id="system-ops-title" style={{ margin: 0, fontSize: 17, fontWeight: 600, color: '#f8fafc' }}>
                 Middleware Architecture & Chaos Recovery Console
               </h2>
               <span style={{ fontSize: 12, color: '#94a3b8' }}>

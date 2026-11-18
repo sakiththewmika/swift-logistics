@@ -6,6 +6,15 @@ on:
   pull_request:
     branches: [ main, dev ]
 
+# Read-only token: the pipeline only builds and tests.
+permissions:
+  contents: read
+
+# A newer push to the same branch makes the older run redundant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   java-services:
     name: Java Services Build & Test
@@ -21,22 +30,25 @@ jobs:
           java-version: '21'
           cache: 'maven'
 
-      - name: Compile and Test Orchestrator
-        run: mvn -B test --file services/orchestrator/pom.xml -Dtest=JwtServiceTest,IdempotencyAndDedupTest
+      # Every suite runs in full. The Spring context tests use a hermetic "test" profile
+      # (src/test/resources/application-test.properties), so no database, broker or registry is needed.
+      - name: Test Orchestrator
+        run: mvn -B test --file services/orchestrator/pom.xml
 
-      - name: Compile and Test CMS Adapter
-        run: mvn -B test --file services/cms-adapter/pom.xml -Dtest=OrderConsumerTest
+      - name: Test CMS Adapter
+        run: mvn -B test --file services/cms-adapter/pom.xml
 
-      - name: Compile and Test Legacy CMS
-        run: mvn -B test-compile --file legacy/cms/pom.xml
+      - name: Test Legacy CMS
+        run: mvn -B test --file legacy/cms/pom.xml
 
   python-services:
-    name: Python Services Lint & Test
+    name: Python Services Syntax & Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Same minor version as the service Dockerfiles (python:3.11-slim).
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -52,29 +64,22 @@ jobs:
           pip install -r services/wms-adapter/app/requirements.txt
           pip install -r services/ros-integration/requirements.txt
 
-      - name: Syntax verification (py_compile)
-        run: |
-          for dir in services/wms-adapter services/ros-integration legacy/wms legacy/ros; do
-            if [ -d "$dir" ]; then
-              echo "Validating Python syntax in $dir..."
-              python -m compileall "$dir"
-            fi
-          done
+      - name: Syntax verification (compileall)
+        run: python -m compileall -q services/wms-adapter services/ros-integration
 
       - name: Run Python unit tests
         env:
           DEDUP_DB_PATH: ':memory:'
         run: |
-          if [ -d "services/wms-adapter/test" ]; then
-            python -m unittest discover -s services/wms-adapter/test -p "test_*.py"
-          fi
-          if [ -d "services/ros-integration/test" ]; then
-            python -m unittest discover -s services/ros-integration/test -p "test_*.py"
-          fi
+          python -m unittest discover -s services/wms-adapter/test -p "test_*.py"
+          python -m unittest discover -s services/ros-integration/test -p "test_*.py"
 
   frontend-ui:
-    name: Frontend UI Build
+    name: Frontend UI Build & Test
     runs-on: ubuntu-latest
+    env:
+      # CI=true makes Create React App treat ESLint warnings as build errors and run Jest non-interactively.
+      CI: true
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -88,21 +93,19 @@ jobs:
             ui/client-portal/package-lock.json
             ui/driver-app/package-lock.json
 
-      - name: Build Client Portal
+      - name: Install, build and test Client Portal
         working-directory: ui/client-portal
-        env:
-          CI: false
         run: |
           npm ci
           npm run build
+          npm test -- --watchAll=false
 
-      - name: Build Driver App
+      - name: Install, build and test Driver App
         working-directory: ui/driver-app
-        env:
-          CI: false
         run: |
           npm ci
           npm run build
+          npm test -- --watchAll=false
 
   docker-compose-check:
     name: Docker Compose Validation

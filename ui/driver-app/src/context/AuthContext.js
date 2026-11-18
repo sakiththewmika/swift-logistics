@@ -15,7 +15,9 @@ export const AuthProvider = ({ children }) => {
         if (token && storedDriver) {
             try {
                 const parsedDriver = JSON.parse(storedDriver);
-                if (parsedDriver?.driverId === token) {
+                const storedJwt = parsedDriver?.token || parsedDriver?.accessToken;
+                // Both the driver record and the JWT it was issued with must still match.
+                if (parsedDriver?.driverId && storedJwt === token) {
                     setDriver(parsedDriver);
                 } else {
                     localStorage.removeItem('driver_token');
@@ -34,10 +36,12 @@ export const AuthProvider = ({ children }) => {
     const login = async (driverName, password) => {
         try {
             const user = await loginApi(driverName, password);
-            console.log("user:", user);
-            const token = user.driverId;
+            const token = user.token || user.accessToken;
+            if (!user.driverId || !token) {
+                throw new Error('Login response did not include a session token.');
+            }
 
-            // Store the token and user details
+            // Store the JWT and user details
             localStorage.setItem('driver_token', token);
             localStorage.setItem('driver_details', JSON.stringify(user));
 
@@ -53,9 +57,13 @@ export const AuthProvider = ({ children }) => {
     const signup = async (driver) => {
         try {
             const user = await signupApi(driver);
-            localStorage.setItem('driver_token', user.driverId);
+            const token = user.token || user.accessToken;
+            if (!user.driverId || !token) {
+                throw new Error('Signup response did not include a session token.');
+            }
+            localStorage.setItem('driver_token', token);
             localStorage.setItem('driver_details', JSON.stringify(user));
-            setToken(user.driverId);
+            setToken(token);
             setDriver(user);
         } catch (error) {
             console.error("Signup failed:", error);
@@ -65,7 +73,7 @@ export const AuthProvider = ({ children }) => {
 
     const logout = async () => {
         try {
-            await logoutApi();
+            await logoutApi(driver?.driverName || driver?.driverId);
         } catch (e) {
             console.log("Logout failed:", e);
         }

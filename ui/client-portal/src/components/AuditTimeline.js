@@ -3,7 +3,6 @@ import {
   CheckCircle2,
   AlertCircle,
   Clock,
-  Layers,
   Activity,
   ArrowRight
 } from 'lucide-react';

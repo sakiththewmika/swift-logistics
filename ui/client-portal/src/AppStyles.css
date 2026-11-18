@@ -17,7 +17,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  height: 64px;
+  min-height: 64px;
 }
 .logo {
   display: flex;
@@ -61,7 +61,7 @@
   position: absolute;
   right: 0;
   margin-top: 8px;
-  width: 320px;
+  width: min(320px, calc(100vw - 32px));
   background-color: white;
   border-radius: 6px;
   box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
@@ -202,8 +202,10 @@
   border-radius: 10px;
   box-shadow: 0 4px 24px rgba(0,0,0,0.12);
   padding: 32px 28px 24px 28px;
-  min-width: 340px;
+  min-width: min(340px, 95vw);
   max-width: 95vw;
+  max-height: 92vh;
+  overflow-y: auto;
   position: relative;
 }
 .create-order-form {
@@ -249,15 +251,24 @@
   color: #fff;
   transition: background 0.2s;
 }
+/* Primary (submit) actions are always blue; secondary (type="button") actions are grey. */
+.modal-actions button[type="submit"] {
+  background: #2563eb;
+  color: #fff;
+}
+.modal-actions button[type="submit"]:hover:not(:disabled) {
+  background: #1d4ed8;
+}
 .modal-actions button[type="button"] {
   background: #e5e7eb;
   color: #374151;
 }
-.modal-actions button:hover {
-  background: #1d4ed8;
-}
-.modal-actions button[type="button"]:hover {
+.modal-actions button[type="button"]:hover:not(:disabled) {
   background: #d1d5db;
+}
+.modal-actions button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 .create-order-btn {
   background: #2563eb;
@@ -350,3 +361,127 @@
 }
 
 
+
+
+/* ------------------------------------------------------------------ */
+/* Master-detail workspace                                             */
+/* ------------------------------------------------------------------ */
+.workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(340px, 380px) 1fr;
+  gap: 20px;
+}
+
+/* Both columns fill the viewport below the header on wide screens. */
+.order-panel {
+  height: calc(100vh - 220px);
+  min-height: 680px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Keyboard focus: never remove the indicator without replacing it     */
+/* ------------------------------------------------------------------ */
+button:focus-visible,
+[role="button"]:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+input:focus-visible,
+.modal:focus-visible,
+[role="dialog"]:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.order-search-input:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+  border-color: #2563eb;
+}
+
+[role="dialog"]:focus {
+  outline: none; /* the dialog container is focused programmatically; its controls show their own rings */
+}
+
+.create-order-form input:focus-visible {
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
+}
+
+/* ------------------------------------------------------------------ */
+/* Tablet and below                                                    */
+/* ------------------------------------------------------------------ */
+@media (max-width: 1024px) {
+  .header-content {
+    flex-wrap: wrap;
+    row-gap: 8px;
+    padding: 8px 16px;
+  }
+
+  .header-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .workspace-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Stacked panels size to their content; the list keeps its own scroll area. */
+  .order-panel {
+    height: auto;
+    min-height: 0;
+  }
+
+  .order-list-panel {
+    max-height: 70vh;
+  }
+
+  .order-details.order-panel {
+    overflow-y: visible !important;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Phones                                                              */
+/* ------------------------------------------------------------------ */
+@media (max-width: 640px) {
+  .header-content {
+    justify-content: center;
+  }
+
+  .header-actions {
+    justify-content: center;
+  }
+
+  .create-order-btn {
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+
+  .modal {
+    padding: 20px 16px 16px 16px;
+  }
+
+  .modal-actions {
+    flex-wrap: wrap;
+  }
+
+  .notification-dropdown {
+    position: fixed;
+    top: 72px;
+    right: 16px;
+    left: 16px;
+    width: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kpi-card,
+  .create-order-btn,
+  .modal-actions button {
+    transition: none;
+  }
+  .kpi-card:hover {
+    transform: none;
+  }
+}

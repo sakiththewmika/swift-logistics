@@ -1,70 +1,55 @@
-# Getting Started with Create React App
+# Client Portal
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+The customer-facing web app: place orders, follow them through the saga, watch the delivery on a live
+map, and (for demos) trigger failure scenarios from the Ops console. React 19 (Create React App),
+Leaflet, lucide-react. Served on port **3000**.
 
-## Available Scripts
+## Features
 
-In the project directory, you can run:
+- Sign in / sign up (JWT kept in `localStorage`); the order list and KPIs load for the signed-in customer.
+- Master-detail view: searchable, filterable order list; details with a stage stepper, driver and amount,
+  proof of delivery, and the audit trail. The layout collapses to one column below 1024 px.
+- Live updates over Server-Sent Events (`/sse/order/{id}`) with automatic reconnect; the list also refreshes
+  every 4 s while any order can still change.
+- Live driver position on a Leaflet map (OpenStreetMap tiles).
+- **Middleware Ops & Chaos** console: happy-path order, duplicate-key idempotency test, rollback test
+  (`[FAIL_ROUTE]`) and dead-letter replay. If nobody is signed in it signs in as the demo customer
+  (`client@swift.lk`).
+- Keyboard-accessible dialogs (Escape closes), labelled controls and a polite live region for notifications.
 
-### `npm start`
+## Running
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+With the whole stack (recommended):
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+```bash
+cd ../../infra && docker compose up --build -d     # http://localhost:3000
+```
 
-### `npm test`
+The API address is baked in at **build time**. Change it with the `REACT_APP_API_BASE_URL` build argument
+(default `http://localhost:8080/api/v1`); the SSE URL is derived from it.
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+For development with hot reload (needs Node 20): `npm ci && npm start`, which serves on port 3000 and talks to
+the API at `REACT_APP_API_BASE_URL`.
 
-### `npm run build`
+## Build and test
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+```bash
+docker run --rm -v "$PWD":/app -w /app -e CI=true node:20-slim \
+  sh -c 'npm ci && npm run build && npm test -- --watchAll=false'
+```
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+`CI=true` makes the build fail on any lint warning. Tests use Jest and Testing Library; they cover the
+modals, order list, `OrderDetails`, the SSE client, polling, the Ops console and accessibility behaviour.
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+## Structure
 
-### `npm run eject`
-
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
-
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
-
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
-
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
-
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
-
-### Code Splitting
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+```
+src/
+  App.js                 portal shell, polling, notifications, KPIs
+  components/            OrderList, OrderDetails, OrderStepper, AuditTimeline, LiveDeliveryMap,
+                         CreateOrderModal, SignIn/SignUp, SystemOpsModal, Toast, Notification*
+  context/AuthContext.js session state
+  hooks/useModalA11y.js  Escape handling and focus management for dialogs
+  network/               fetch client, order and auth endpoints, SSE client
+  utils/geo.js           destination lookup and HTML escaping for map popups
+```

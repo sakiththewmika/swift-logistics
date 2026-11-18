@@ -8,6 +8,7 @@ import com.swiftlogistics.orchestrator.model.enums.EventType;
 import com.swiftlogistics.orchestrator.model.enums.OrderStatus;
 import com.swiftlogistics.orchestrator.service.OrderService;
 import com.swiftlogistics.orchestrator.service.EventService;
+import com.swiftlogistics.orchestrator.service.StatusMessages;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
@@ -37,21 +38,10 @@ public class BillingUpdateSubscriber {
             log.info("Received billing update: orderId={}, status={}",
                     billingUpdate.getOrderId(), billingUpdate.getStatus());
 
-            orderService.processBillingUpdate(billingUpdate);
-            if ("BILLED".equals(billingUpdate.getStatus())) {
-                ssePublisher.publishOrderStatusUpdate(billingUpdate.getOrderId(), OrderStatus.BILLED,
-                        "Billing completed successfully");
-            } else if ("FAILED".equals(billingUpdate.getStatus())) {
-                ssePublisher.publishOrderStatusUpdate(billingUpdate.getOrderId(), OrderStatus.BILLING_FAILED,
-                        "Billing failed");
-            } else if ("PENDING".equals(billingUpdate.getStatus())) {
-                ssePublisher.publishOrderStatusUpdate(billingUpdate.getOrderId(), OrderStatus.BILLING_PENDING,
-                        "Billing is pending");
-            } else if ("CANCELLED_REFUNDED".equals(billingUpdate.getStatus())
-                    || "BILLING_REFUNDED".equals(billingUpdate.getStatus())) {
-                ssePublisher.publishOrderStatusUpdate(billingUpdate.getOrderId(),
-                        OrderStatus.CANCELLED_REFUNDED, "Order cancelled and billing refunded");
-            }
+            // Notify clients only when the order actually changed state (not for duplicates or late events).
+            orderService.processBillingUpdate(billingUpdate).ifPresent(status ->
+                    ssePublisher.publishOrderStatusUpdate(billingUpdate.getOrderId(), status,
+                            StatusMessages.describe(status)));
             CorrelationIdContext.clear();
 
         } catch (Exception e) {

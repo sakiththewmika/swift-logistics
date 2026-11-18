@@ -67,6 +67,7 @@ const OrderList = ({
 
   return (
     <div
+      className="order-panel order-list-panel"
       style={{
         backgroundColor: '#ffffff',
         borderRadius: 10,
@@ -74,8 +75,6 @@ const OrderList = ({
         boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.05)',
         display: 'flex',
         flexDirection: 'column',
-        height: 'calc(100vh - 220px)',
-        minHeight: 680,
       }}
     >
       {/* Header & Search */}
@@ -109,7 +108,9 @@ const OrderList = ({
             style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)' }}
           />
           <input
-            type="text"
+            type="search"
+            aria-label="Search orders"
+            className="order-search-input"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Search order ID, address, driver..."
@@ -120,13 +121,13 @@ const OrderList = ({
               borderRadius: 6,
               border: '1px solid #cbd5e1',
               fontSize: 13,
-              outline: 'none',
               backgroundColor: '#f8fafc',
             }}
           />
           {searchTerm && (
             <button
               type="button"
+              aria-label="Clear search"
               onClick={() => setSearchTerm('')}
               style={{
                 position: 'absolute',
@@ -225,7 +226,18 @@ const OrderList = ({
               return (
                 <div
                   key={order.orderId}
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={isSelected}
+                  aria-label={`Order ${order.orderId}, ${formatStatus(order.status)}`}
                   onClick={() => onSelect(order)}
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget) return;
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      onSelect(order);
+                    }
+                  }}
                   style={{
                     backgroundColor: isSelected ? '#eff6ff' : '#ffffff',
                     border: isSelected ? '2px solid #2563eb' : '1px solid #e2e8f0',

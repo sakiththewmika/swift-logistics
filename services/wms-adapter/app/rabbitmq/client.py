@@ -7,6 +7,7 @@ import os
 import re
 import time
 import urllib.request
+import uuid
 
 import pika
 
@@ -63,6 +64,12 @@ def emit_zipkin_span(service_name, span_name, headers, correlation_id, start_tim
     except Exception as exc:
         print(f"[ZIPKIN] Span export unavailable: {exc}")
     return f"00-{trace_id}-{span_id}-01"
+
+
+# A dedup row left in PROCESSING longer than this belongs to a crashed attempt and may be reclaimed.
+DEDUP_STALE_SECONDS = int(os.getenv("DEDUP_STALE_SECONDS", "60"))
+MAX_DELIVERY_ATTEMPTS = 4
+CONSUMER_RESTART_DELAY_SECONDS = 5
 
 
 class RabbitMQClient:
@@ -174,6 +181,67 @@ class RabbitMQClient:
             channel.close()
             connection.close()
 
+    def _claim_dedup(self, dedup_key):
+        """Claims dedup_key; reclaims a PROCESSING row abandoned by a crashed attempt. False = duplicate."""
+        with self.dedup_lock:
+            now = int(time.time())
+            try:
+                self.dedup_connection.execute(
+                    "INSERT INTO processed_orders (dedup_key, status, created_at) VALUES (?, ?, ?)",
+                    (dedup_key, "PROCESSING", now),
+                )
+                self.dedup_connection.commit()
+                return True
+            except sqlite3.IntegrityError:
+                row = self.dedup_connection.execute(
+                    "SELECT status, created_at FROM processed_orders WHERE dedup_key = ?",
+                    (dedup_key,),
+                ).fetchone()
+                if row and row[0] == "PROCESSING" and (row[1] or 0) < now - DEDUP_STALE_SECONDS:
+                    self.dedup_connection.execute(
+                        "UPDATE processed_orders SET created_at = ? WHERE dedup_key = ? AND status = 'PROCESSING'",
+                        (now, dedup_key),
+                    )
+                    self.dedup_connection.commit()
+                    print(f"[RABBITMQ] Reclaimed stale PROCESSING dedup entry {dedup_key}")
+                    return True
+                return False
+
+    def _release_dedup(self, dedup_key):
+        with self.dedup_lock:
+            self.dedup_connection.execute(
+                "DELETE FROM processed_orders WHERE dedup_key = ?", (dedup_key,)
+            )
+            self.dedup_connection.commit()
+
+    def _notify_packaging_failed(self, message):
+        """Tells the orchestrator packaging cannot happen so it starts billing compensation."""
+        order_id = message.get("orderId") if isinstance(message, dict) else None
+        if not order_id:
+            return
+        try:
+            self.publish("warehouse-updates", {
+                "messageId": str(uuid.uuid4()),
+                "orderId": order_id,
+                "status": "FAILED",
+            })
+            print(f"[RABBITMQ] Reported warehouse FAILED for order {order_id}")
+        except Exception as exc:
+            print(f"[RABBITMQ] Unable to report warehouse failure for order {order_id}: {exc}")
+
+    def consume_forever(self, queue, callback, stop_event=None):
+        """Runs consume() and restarts it after any failure (broker restart, dropped connection)."""
+        while stop_event is None or not stop_event.is_set():
+            try:
+                self.consume(queue, callback)
+            except Exception as exc:
+                print(f"[RABBITMQ] Consumer for {queue} stopped ({type(exc).__name__}: {exc}); "
+                      f"restarting in {CONSUMER_RESTART_DELAY_SECONDS}s")
+            if stop_event is not None:
+                stop_event.wait(CONSUMER_RESTART_DELAY_SECONDS)
+            else:
+                time.sleep(CONSUMER_RESTART_DELAY_SECONDS)
+
     def consume(self, queue, callback):
         """Consume with a persistent connection/channel in a dedicated thread."""
         queue_args = {
@@ -188,27 +256,27 @@ class RabbitMQClient:
         def on_message(ch, method, properties, body):
             if time.time() - self._last_dedup_cleanup >= 3600:
                 self.cleanup_expired_dedup_records()
-            message = json.loads(body.decode())
+            try:
+                message = json.loads(body.decode())
+                if not isinstance(message, dict):
+                    raise ValueError("message body is not a JSON object")
+            except (ValueError, UnicodeDecodeError) as exc:
+                # A poison message must not kill the consumer: dead-letter it.
+                print(f"[RABBITMQ] Unreadable message on {queue}: {exc}")
+                ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+                return
             message_id = (properties.message_id if properties else None) or message.get("messageId") or message.get("orderId")
             step = "WMS_COMPENSATION" if queue == "warehouse-compensation" else "WMS_PACKAGING"
             dedup_key = f"{message.get('orderId')}:{step}"
-            with self.dedup_lock:
-                try:
-                    self.dedup_connection.execute(
-                        "INSERT INTO processed_orders (dedup_key, status) VALUES (?, ?)",
-                        (dedup_key, "PROCESSING"),
-                    )
-                    self.dedup_connection.commit()
-                except sqlite3.IntegrityError:
-                    ch.basic_ack(delivery_tag=method.delivery_tag)
-                    print(f"[RABBITMQ] Duplicate {dedup_key} acknowledged")
-                    return
+            if not self._claim_dedup(dedup_key):
+                ch.basic_ack(delivery_tag=method.delivery_tag)
+                print(f"[RABBITMQ] Duplicate {dedup_key} acknowledged")
+                return
             with self.lock:
                 if message_id in self.processed_message_ids:
                     ch.basic_ack(delivery_tag=method.delivery_tag)
                     return
             try:
-                start_time_us = time.time_ns() // 1000
                 parameters = inspect.signature(callback).parameters
                 if len(parameters) >= 2:
                     callback(message, properties)
@@ -225,24 +293,23 @@ class RabbitMQClient:
                     self.dedup_connection.commit()
                 ch.basic_ack(delivery_tag=method.delivery_tag)
             except (RuntimeError, OSError) as exc:
-                with self.dedup_lock:
-                    self.dedup_connection.execute(
-                        "DELETE FROM processed_orders WHERE dedup_key = ?", (dedup_key,)
-                    )
-                    self.dedup_connection.commit()
+                self._release_dedup(dedup_key)
                 with self.lock:
                     retries = self.retry_counts.get(message_id, 0) + 1
                     self.retry_counts[message_id] = retries
-                should_retry = retries < 4
-                print(f"[RABBITMQ] Transient adapter failure (attempt {retries}/4): {exc}")
+                should_retry = retries < MAX_DELIVERY_ATTEMPTS
+                print(f"[RABBITMQ] Transient adapter failure (attempt {retries}/{MAX_DELIVERY_ATTEMPTS}): {exc}")
+                if not should_retry:
+                    with self.lock:
+                        self.retry_counts.pop(message_id, None)
+                    if queue == "warehouse-queue":
+                        self._notify_packaging_failed(message)
                 ch.basic_nack(delivery_tag=method.delivery_tag, requeue=should_retry)
             except Exception as exc:
-                with self.dedup_lock:
-                    self.dedup_connection.execute(
-                        "DELETE FROM processed_orders WHERE dedup_key = ?", (dedup_key,)
-                    )
-                    self.dedup_connection.commit()
+                self._release_dedup(dedup_key)
                 print(f"[RABBITMQ] Non-retryable message failure: {exc}")
+                if queue == "warehouse-queue":
+                    self._notify_packaging_failed(message)
                 ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
         channel.basic_consume(queue=queue, on_message_callback=on_message)

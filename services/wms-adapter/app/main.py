@@ -11,12 +11,17 @@ from rabbitmq.client import RabbitMQClient, emit_zipkin_span
 from wms.client import WMSClient
 from consul import register_service
 
-wms_client = WMSClient()
-rabbitmq_client = RabbitMQClient()
-correlation_ids_by_order = {}
-
+# Settings from .env must be in the environment before the clients read them.
 dotenv_path = os.path.join(os.path.dirname(__file__), ".env")
 load_dotenv(dotenv_path, override=False)
+
+wms_client = WMSClient()
+rabbitmq_client = RabbitMQClient()
+
+# Request context per order, written by the RabbitMQ consumer threads and consumed by the WMS listener thread.
+correlation_ids_by_order = {}
+correlation_lock = threading.Lock()
+CORRELATION_TTL_SECONDS = 3600
 
 app = FastAPI()
 
@@ -35,7 +40,8 @@ def handle_message(message):
     parsed_mssg = parse_string_to_dict(message)
     parsed_mssg["messageId"] = str(uuid.uuid4())
     print(f"[WMS-ADAPTER] Parsed WMS message: {parsed_mssg}")
-    context = correlation_ids_by_order.pop(parsed_mssg.get("orderId"), {})
+    with correlation_lock:
+        context = correlation_ids_by_order.pop(parsed_mssg.get("orderId"), {})
     correlation_id = context.get("correlation_id")
     headers = context.get("headers", {})
     start_time_us = context.get("start_time_us", time.time_ns() // 1000)
@@ -73,12 +79,23 @@ def handle_compensation(message, properties=None):
         "status": "PACKAGE_RELEASED"
     }, get_correlation_id(properties), {**headers, "traceparent": traceparent})
 
+def remember_context(order_id, properties):
+    """Stores trace context for the WMS reply; entries the WMS never answered are dropped after an hour."""
+    now = time.time()
+    with correlation_lock:
+        for key in [k for k, v in correlation_ids_by_order.items()
+                    if now - v.get("stored_at", now) > CORRELATION_TTL_SECONDS]:
+            del correlation_ids_by_order[key]
+        correlation_ids_by_order[order_id] = {
+            "correlation_id": get_correlation_id(properties),
+            "headers": dict((properties.headers if properties else {}) or {}),
+            "start_time_us": time.time_ns() // 1000,
+            "stored_at": now,
+        }
+
+
 def process_order(message, properties=None):
-    correlation_ids_by_order[message.get("orderId")] = {
-        "correlation_id": get_correlation_id(properties),
-        "headers": dict((properties.headers if properties else {}) or {}),
-        "start_time_us": time.time_ns() // 1000,
-    }
+    remember_context(message.get("orderId"), properties)
     parsed_order = parse_dict_to_string(message)
     wms_client.send_order(parsed_order)
 
@@ -86,28 +103,18 @@ def process_compensation(message, properties=None):
     order_id = message.get("orderId")
     if not order_id:
         raise ValueError("Warehouse compensation message is missing orderId")
-    correlation_ids_by_order[order_id] = {
-        "correlation_id": get_correlation_id(properties),
-        "headers": dict((properties.headers if properties else {}) or {}),
-        "start_time_us": time.time_ns() // 1000,
-    }
+    remember_context(order_id, properties)
     wms_client.cancel_package(order_id)
 
 
 def start_wms_listener():
-    wms_listener = threading.Thread(target=wms_client.listen_for_updates, args=(handle_message, ))
-    wms_listener.daemon = True
-    wms_listener.start()
-
-    consumer = threading.Thread(target=rabbitmq_client.consume, args=("warehouse-queue", process_order))
-    consumer.daemon = True
-    consumer.start()
-    compensation_consumer = threading.Thread(
-        target=rabbitmq_client.consume,
-        args=("warehouse-compensation", process_compensation)
-    )
-    compensation_consumer.daemon = True
-    compensation_consumer.start()
+    # The listener and both consumers reconnect on their own, so a WMS or broker restart never
+    # leaves the adapter silently deaf while /health still reports ok.
+    threading.Thread(target=wms_client.listen_for_updates, args=(handle_message,), daemon=True).start()
+    threading.Thread(target=rabbitmq_client.consume_forever,
+                     args=("warehouse-queue", process_order), daemon=True).start()
+    threading.Thread(target=rabbitmq_client.consume_forever,
+                     args=("warehouse-compensation", process_compensation), daemon=True).start()
 
 @app.on_event("startup")
 def startup_event():
@@ -115,8 +122,6 @@ def startup_event():
         register_service("wms-adapter", "wms-adapter", 8003)
         register_service("wms-mock", "wms-mock", 9000, tcp_check=True)
         wms_client.refresh_endpoint()
-        wms_client.sock.close()
-        wms_client.connect()
         print("[CONSUL] Registered WMS adapter and WMS service.")
     except Exception as exc:
         print(f"[CONSUL] Registration unavailable; continuing with fallback: {exc}")

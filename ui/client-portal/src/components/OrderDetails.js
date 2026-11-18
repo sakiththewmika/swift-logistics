@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import StatusBadge from './StatusBadge';
 import OrderStepper from './OrderStepper';
 import AuditTimeline from './AuditTimeline';
@@ -17,11 +17,17 @@ import {
 } from 'lucide-react';
 import { orderEndpoints } from '../network/order';
 
-const OrderDetails = ({ order, getStatusColor, getStatusIcon, formatStatus, onOrderUpdated }) => {
+const OrderDetailsContent = ({ order, getStatusColor, getStatusIcon, formatStatus, onOrderUpdated }) => {
   const [events, setEvents] = useState([]);
   const [eventsLoading, setEventsLoading] = useState(false);
   const [currentStatus, setCurrentStatus] = useState(order?.status || 'NEW');
   const [driverLocation, setDriverLocation] = useState(null);
+
+  // Always call the latest refresh callback without re-subscribing the SSE stream when its identity changes.
+  const onOrderUpdatedRef = useRef(onOrderUpdated);
+  useEffect(() => {
+    onOrderUpdatedRef.current = onOrderUpdated;
+  }, [onOrderUpdated]);
 
   // Sync internal status with prop
   useEffect(() => {
@@ -32,9 +38,10 @@ const OrderDetails = ({ order, getStatusColor, getStatusIcon, formatStatus, onOr
 
   // Load audit events and connect to SSE stream
   useEffect(() => {
+    // Never carry the previous order's trail or truck position into this one.
+    setEvents([]);
+    setDriverLocation(null);
     if (!order?.orderId) {
-      setEvents([]);
-      setDriverLocation(null);
       return;
     }
 
@@ -76,9 +83,12 @@ const OrderDetails = ({ order, getStatusColor, getStatusIcon, formatStatus, onOr
             });
             return;
           }
-          if (update.status) {
+          if (update.type === 'sse-reconnected') {
+            // Updates may have been missed while the stream was down: resync the list and the trail.
+            onOrderUpdatedRef.current?.();
+          } else if (update.status) {
             setCurrentStatus(update.status);
-            onOrderUpdated?.();
+            onOrderUpdatedRef.current?.();
           }
         }
         loadEvents();
@@ -103,11 +113,12 @@ const OrderDetails = ({ order, getStatusColor, getStatusIcon, formatStatus, onOr
         sseSource.close();
       }
     };
-  }, [onOrderUpdated, order?.orderId]);
+  }, [order?.orderId]);
 
   if (!order) {
     return (
       <div
+        className="order-panel"
         style={{
           backgroundColor: '#ffffff',
           borderRadius: 10,
@@ -115,8 +126,6 @@ const OrderDetails = ({ order, getStatusColor, getStatusIcon, formatStatus, onOr
           padding: 48,
           textAlign: 'center',
           color: '#94a3b8',
-          height: 'calc(100vh - 220px)',
-          minHeight: 680,
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
@@ -156,14 +165,12 @@ const OrderDetails = ({ order, getStatusColor, getStatusIcon, formatStatus, onOr
 
   return (
     <div
-      className="order-details"
+      className="order-details order-panel"
       key={order.orderId}
       style={{
         margin: 0,
         borderRadius: 10,
         border: '1px solid #e2e8f0',
-        height: 'calc(100vh - 220px)',
-        minHeight: 680,
         overflowY: 'auto',
         padding: 20,
         boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.05)',
@@ -316,12 +323,14 @@ const OrderDetails = ({ order, getStatusColor, getStatusIcon, formatStatus, onOr
                 </div>
               ) : (
                 <div style={{ background: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: 6, padding: 16, textAlign: 'center', color: '#94a3b8', fontSize: 12 }}>
-                  Direct Handover (Signature on file)
+                  No signature image recorded
                 </div>
               )}
-              <div style={{ fontSize: 11, color: '#16a34a', marginTop: 6, textAlign: 'center', fontWeight: 500 }}>
-                ✓ Identity Verified
-              </div>
+              {order.proofOfDeliverySignature && (
+                <div style={{ fontSize: 11, color: '#16a34a', marginTop: 6, textAlign: 'center', fontWeight: 500 }}>
+                  ✓ Identity Verified
+                </div>
+              )}
             </div>
 
             {/* Delivery Photo Preview */}
@@ -393,5 +402,9 @@ const OrderDetails = ({ order, getStatusColor, getStatusIcon, formatStatus, onOr
     </div>
   );
 };
+
+// Remounting per order resets every piece of per-order state (events, truck position, status) at once,
+// so switching from order A to order B can never briefly show A's data.
+const OrderDetails = (props) => <OrderDetailsContent key={props.order?.orderId ?? 'none'} {...props} />;
 
 export default OrderDetails;

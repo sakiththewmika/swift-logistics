@@ -62,7 +62,7 @@ const SignUp = ({ onSwitchToLogin }) => {
         </div>
         <div style={{ marginBottom: 12 }}>
           <input
-            type="type"
+            type="text"
             name="type"
             placeholder="Vehicle Type"
             value={form.type}

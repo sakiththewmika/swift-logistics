@@ -1,9 +1,11 @@
 import sys
 import os
+import threading
+import time
 import types
 import json
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 os.environ.setdefault('DEDUP_DB_PATH', ':memory:')
 
@@ -203,6 +205,171 @@ class RabbitMQClientTests(unittest.TestCase):
         self.assertEqual(len(attempts), 2)
         self.assertEqual(channel.basic_nack.call_args.kwargs['requeue'], True)
         self.assertEqual(channel.basic_ack.call_count, 1)
+
+
+class WarehouseQueueFailureTests(unittest.TestCase):
+    """Failure reporting, poison messages, stale dedup rows and consumer supervision."""
+
+    def build(self, queue='warehouse-queue', deliveries=None, callback=None, properties=None):
+        channel = MagicMock()
+        captured = {}
+
+        def basic_consume(queue, on_message_callback, auto_ack=False):
+            captured['cb'] = on_message_callback
+
+        def start_consuming():
+            for tag, body in deliveries:
+                method = types.SimpleNamespace(delivery_tag=tag)
+                captured['cb'](channel, method, properties, body)
+
+        channel.basic_consume.side_effect = basic_consume
+        channel.start_consuming.side_effect = start_consuming
+        connection = MagicMock()
+        connection.channel.return_value = channel
+        install_stub_pika(channel, connection)
+        client = import_client_module().RabbitMQClient()
+        self.addCleanup(client.close)
+        client.consume(queue, callback)
+        return client, channel
+
+    @staticmethod
+    def published_bodies(channel):
+        return [json.loads(call.kwargs['body']) for call in channel.basic_publish.call_args_list
+                if call.kwargs.get('routing_key') == 'warehouse-updates']
+
+    def order_body(self, order_id='order-1'):
+        return json.dumps({'orderId': order_id}).encode()
+
+    def test_exhausted_retries_report_failure_and_dead_letter(self):
+        props = types.SimpleNamespace(message_id='msg-1', headers={})
+        attempts = []
+
+        def callback(message):
+            attempts.append(message)
+            raise RuntimeError('WMS unreachable')
+
+        _, channel = self.build(deliveries=[(i, self.order_body()) for i in range(1, 5)],
+                                callback=callback, properties=props)
+
+        requeues = [call.kwargs['requeue'] for call in channel.basic_nack.call_args_list]
+        self.assertEqual(requeues, [True, True, True, False])
+        failures = self.published_bodies(channel)
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0]['orderId'], 'order-1')
+        self.assertEqual(failures[0]['status'], 'FAILED')
+        self.assertTrue(failures[0]['messageId'])
+
+    def test_no_failure_is_reported_while_retries_remain(self):
+        props = types.SimpleNamespace(message_id='msg-1', headers={})
+
+        def callback(message):
+            raise RuntimeError('transient')
+
+        _, channel = self.build(deliveries=[(1, self.order_body())], callback=callback, properties=props)
+
+        self.assertEqual(self.published_bodies(channel), [])
+        self.assertEqual(channel.basic_nack.call_args.kwargs['requeue'], True)
+
+    def test_non_retryable_failure_reports_failed_and_dead_letters(self):
+        props = types.SimpleNamespace(message_id='msg-2', headers={})
+
+        def callback(message):
+            raise ValueError('cannot build WMS message')
+
+        _, channel = self.build(deliveries=[(1, self.order_body('order-2'))], callback=callback, properties=props)
+
+        self.assertEqual(channel.basic_nack.call_args.kwargs['requeue'], False)
+        self.assertEqual([b['orderId'] for b in self.published_bodies(channel)], ['order-2'])
+
+    def test_compensation_queue_failures_do_not_publish_packaging_failures(self):
+        props = types.SimpleNamespace(message_id='msg-3', headers={})
+
+        def callback(message):
+            raise ValueError('boom')
+
+        _, channel = self.build(queue='warehouse-compensation', deliveries=[(1, self.order_body('order-3'))],
+                                callback=callback, properties=props)
+
+        self.assertEqual(self.published_bodies(channel), [])
+        self.assertEqual(channel.basic_nack.call_args.kwargs['requeue'], False)
+
+    def test_unreadable_message_is_dead_lettered_and_consumer_continues(self):
+        props = types.SimpleNamespace(message_id='msg-4', headers={})
+        received = []
+
+        _, channel = self.build(deliveries=[(1, b'{not json'), (2, self.order_body('order-4'))],
+                                callback=lambda message: received.append(message), properties=props)
+
+        self.assertEqual(channel.basic_nack.call_args_list[0].kwargs, {'delivery_tag': 1, 'requeue': False})
+        self.assertEqual(received, [{'orderId': 'order-4'}])
+        self.assertEqual(self.published_bodies(channel), [])
+
+    def _seed_and_consume(self, status, age_seconds):
+        channel = MagicMock()
+        captured = {}
+        received = []
+
+        def basic_consume(queue, on_message_callback, auto_ack=False):
+            captured['cb'] = on_message_callback
+
+        channel.basic_consume.side_effect = basic_consume
+        connection = MagicMock()
+        connection.channel.return_value = channel
+        install_stub_pika(channel, connection)
+        client = import_client_module().RabbitMQClient()
+        self.addCleanup(client.close)
+        client.dedup_connection.execute(
+            "INSERT INTO processed_orders (dedup_key, status, created_at) VALUES (?, ?, ?)",
+            ('order-5:WMS_PACKAGING', status, int(time.time()) - age_seconds))
+        client.dedup_connection.commit()
+
+        def start_consuming():
+            props = types.SimpleNamespace(message_id='msg-5', headers={})
+            captured['cb'](channel, types.SimpleNamespace(delivery_tag=1), props, self.order_body('order-5'))
+
+        channel.start_consuming.side_effect = start_consuming
+        client.consume('warehouse-queue', lambda message: received.append(message))
+        return received, channel
+
+    def test_stale_processing_row_is_reclaimed_on_redelivery(self):
+        received, channel = self._seed_and_consume('PROCESSING', 120)
+
+        self.assertEqual(received, [{'orderId': 'order-5'}])
+        channel.basic_ack.assert_called_once()
+
+    def test_recent_processing_row_is_treated_as_a_duplicate(self):
+        received, channel = self._seed_and_consume('PROCESSING', 5)
+
+        self.assertEqual(received, [])
+        channel.basic_ack.assert_called_once()
+
+    def test_completed_rows_are_never_reclaimed(self):
+        received, _ = self._seed_and_consume('COMPLETED', 7200)
+
+        self.assertEqual(received, [])
+
+    def test_consume_forever_restarts_after_a_failure(self):
+        channel = MagicMock()
+        connection = MagicMock()
+        connection.channel.return_value = channel
+        install_stub_pika(channel, connection)
+        client_module = import_client_module()
+        client = client_module.RabbitMQClient()
+        self.addCleanup(client.close)
+        stop = threading.Event()
+        calls = []
+
+        def flaky_consume(queue, callback):
+            calls.append(queue)
+            if len(calls) == 1:
+                raise ConnectionError('broker restarted')
+            stop.set()
+
+        client.consume = flaky_consume
+        with patch.object(client_module, 'CONSUMER_RESTART_DELAY_SECONDS', 0.01):
+            client.consume_forever('warehouse-queue', lambda message: None, stop)
+
+        self.assertEqual(calls, ['warehouse-queue', 'warehouse-queue'])
 
 
 if __name__ == '__main__':
