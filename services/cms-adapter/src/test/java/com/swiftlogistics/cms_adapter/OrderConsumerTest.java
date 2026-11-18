@@ -41,6 +41,7 @@ class OrderConsumerTest {
         filter = mock(IdempotentConsumerFilter.class);
         channel = mock(Channel.class);
         consumer = new OrderConsumer(soapClient, publisher, filter);
+        consumer.setCircuitOpenRequeueDelayMs(0); // keep unit tests fast; the delay itself is tested below
     }
 
     private static Message messageWithDeliveryTag(long deliveryTag) {
@@ -110,6 +111,23 @@ class OrderConsumerTest {
         verify(channel).basicNack(14L, false, true);
         verify(filter).releaseLockOnFailure("order-4:CMS_BILLING");
         verifyNoInteractions(publisher);
+    }
+
+    @Test
+    void openCircuitBacksOffBeforeRequeuingInsteadOfSpinning() throws Exception {
+        when(filter.tryAcquireLock("order-8:CMS_BILLING")).thenReturn(true);
+        CircuitBreaker open = CircuitBreaker.ofDefaults("test");
+        open.transitionToOpenState();
+        when(soapClient.submitOrder("order-8", null, null))
+                .thenThrow(CallNotPermittedException.createCallNotPermittedException(open));
+        consumer.setCircuitOpenRequeueDelayMs(150);
+
+        long started = System.nanoTime();
+        consumer.consumeOrder(order("order-8"), channel, messageWithDeliveryTag(18L), null, null);
+        long elapsedMs = (System.nanoTime() - started) / 1_000_000;
+
+        assertTrue(elapsedMs >= 140, "requeued after only " + elapsedMs + " ms");
+        verify(channel).basicNack(18L, false, true);
     }
 
     @Test

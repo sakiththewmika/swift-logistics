@@ -14,6 +14,8 @@ import com.swiftlogistics.cms_adapter.producer.BillingUpdatePublisher;
 import com.swiftlogistics.cms_adapter.soap.CmsSoapClient;
 
 import lombok.RequiredArgsConstructor;
+import lombok.Setter;
+import org.springframework.beans.factory.annotation.Value;
 import lombok.extern.slf4j.Slf4j;
 
 import java.math.BigDecimal;
@@ -39,6 +41,14 @@ public class OrderConsumer {
     private final CmsSoapClient cmsSoapClient;
     private final BillingUpdatePublisher billingUpdatePublisher;
     private final IdempotentConsumerFilter idempotentConsumerFilter;
+
+    /**
+     * How long to wait before handing a message back while the CMS circuit is open. Without a pause the
+     * broker redelivers it immediately and the consumer spins at full speed until the circuit closes.
+     */
+    @Value("${cms.circuit-open-requeue-delay-ms:5000}")
+    @Setter
+    private long circuitOpenRequeueDelayMs = 5000;
 
     @RabbitListener(
             id = CmsCircuitBreakerConfig.CMS_ORDER_LISTENER_ID,
@@ -77,7 +87,9 @@ public class OrderConsumer {
             } catch (CallNotPermittedException exception) {
                 // Circuit open: not a verdict on this order. Put it back; consumption is paused until the circuit closes.
                 idempotentConsumerFilter.releaseLockOnFailure(dedupKey);
-                log.warn("CMS circuit is OPEN; requeuing order {}", orderMessage.getOrderId());
+                log.warn("CMS circuit is OPEN; requeuing order {} after {} ms",
+                        orderMessage.getOrderId(), circuitOpenRequeueDelayMs);
+                pauseBeforeRequeue();
                 try {
                     channel.basicNack(message.getMessageProperties().getDeliveryTag(), false, true);
                 } catch (java.io.IOException nackException) {
@@ -128,6 +140,17 @@ public class OrderConsumer {
             reportBillingFailureAndAck(orderMessage, channel, message);
         } finally {
             CorrelationIdContext.clear();
+        }
+    }
+
+    private void pauseBeforeRequeue() {
+        if (circuitOpenRequeueDelayMs <= 0) {
+            return;
+        }
+        try {
+            Thread.sleep(circuitOpenRequeueDelayMs);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt(); // shutting down: requeue straight away
         }
     }
 
