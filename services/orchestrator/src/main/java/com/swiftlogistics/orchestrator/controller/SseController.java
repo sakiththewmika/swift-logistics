@@ -29,22 +29,22 @@ public class SseController {
 
         log.info("Order SSE connection requested: orderId={}, lastEventId={}", orderId, lastEventId);
 
-        SseEmitter emitter = new SseEmitter(500_000L); // 5 minutes
+        SseEmitter emitter = new SseEmitter(500_000L); // ~8.3 minutes; browsers reconnect automatically
         orderEmitters.put(orderId, emitter);
 
         emitter.onCompletion(() -> {
             log.info("SSE connection completed for order: {}", orderId);
-            orderEmitters.remove(orderId);
+            orderEmitters.remove(orderId, emitter);
         });
 
         emitter.onTimeout(() -> {
             log.info("SSE connection timed out for order: {}", orderId);
-            orderEmitters.remove(orderId);
+            orderEmitters.remove(orderId, emitter);
         });
 
         emitter.onError((e) -> {
             log.error("SSE connection error for order: {}", orderId, e);
-            orderEmitters.remove(orderId);
+            orderEmitters.remove(orderId, emitter);
         });
 
         try {

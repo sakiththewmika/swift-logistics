@@ -406,6 +406,10 @@ body, .container {
   background-color: #d1d5db;
   color: #374151;
 }
+.modal-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .current-location-text {
   color: #6b7280;
   margin: 0;

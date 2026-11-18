@@ -10,14 +10,12 @@ const ProofOfDeliveryModal = ({ delivery, initialMode = 'DELIVERED', onSubmit, o
   const [mode, setMode] = useState(initialMode); // 'DELIVERED' or 'FAILED'
   const [hasSignature, setHasSignature] = useState(false);
   const [isDrawing, setIsDrawing] = useState(false);
-
-  useEffect(() => {
-    if (initialMode) {
-      setMode(initialMode);
-    }
-  }, [initialMode]);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
 
   const canvasRef = useRef(null);
+  // Latest captured signature, readable from effects without re-running them on every stroke.
+  const signatureRef = useRef('');
   const fileInputRef = useRef(null);
 
   const initCanvas = useCallback(() => {
@@ -38,11 +36,30 @@ const ProofOfDeliveryModal = ({ delivery, initialMode = 'DELIVERED', onSubmit, o
     ctx.setLineDash([]);
   }, []);
 
+  const paintSignature = useCallback((dataUrl) => {
+    const image = new Image();
+    image.onload = () => {
+      const canvas = canvasRef.current;
+      if (canvas) {
+        canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+      }
+    };
+    image.src = dataUrl;
+  }, []);
+
+  useEffect(() => {
+    signatureRef.current = signatureData;
+  }, [signatureData]);
+
+  // The canvas is re-created whenever the Delivered tab is (re)shown: redraw what was already signed.
   useEffect(() => {
     if (delivery && mode === 'DELIVERED') {
-      setTimeout(initCanvas, 50);
+      initCanvas();
+      if (signatureRef.current) {
+        paintSignature(signatureRef.current);
+      }
     }
-  }, [delivery, mode, initCanvas]);
+  }, [delivery, mode, initCanvas, paintSignature]);
 
   if (!delivery) return null;
 
@@ -185,15 +202,45 @@ const ProofOfDeliveryModal = ({ delivery, initialMode = 'DELIVERED', onSubmit, o
     setPhotoData(canvas.toDataURL('image/png'));
   };
 
-  const submit = (status) => {
-    onSubmit({
-      status,
-      signatureData: status === 'DELIVERED' ? signatureData : null,
-      photoData: status === 'DELIVERED' ? photoData : null,
-      notes,
-      failureReason: status === 'FAILED' ? failureReason : null,
-    });
+  const submit = async (status) => {
+    if (submitting) return;
+    if (status === 'DELIVERED' && !hasSignature) {
+      setError('A customer signature is required to confirm delivery.');
+      return;
+    }
+    setSubmitting(true);
+    setError('');
+    try {
+      await onSubmit({
+        status,
+        signatureData: status === 'DELIVERED' ? signatureData : null,
+        photoData: status === 'DELIVERED' ? photoData || null : null,
+        notes,
+        failureReason: status === 'FAILED' ? failureReason.trim() : null,
+      });
+    } catch (err) {
+      setError(err?.message || 'Could not submit the proof of delivery. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
   };
+
+  const errorBanner = error && (
+    <div
+      role="alert"
+      style={{
+        marginBottom: 12,
+        padding: '8px 10px',
+        borderRadius: 6,
+        backgroundColor: '#fef2f2',
+        border: '1px solid #fecaca',
+        color: '#991b1b',
+        fontSize: 13,
+      }}
+    >
+      {error}
+    </div>
+  );
 
   const orderDisplayId = delivery.id || delivery.orderId || '';
 
@@ -209,6 +256,7 @@ const ProofOfDeliveryModal = ({ delivery, initialMode = 'DELIVERED', onSubmit, o
           </div>
           <button
             onClick={onCancel}
+            disabled={submitting}
             style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}
             title="Close"
           >
@@ -468,15 +516,27 @@ const ProofOfDeliveryModal = ({ delivery, initialMode = 'DELIVERED', onSubmit, o
               />
             </div>
 
+            {errorBanner}
+            {!hasSignature && (
+              <p style={{ margin: '0 0 8px', fontSize: 12, color: '#b45309' }}>
+                Capture the customer's signature to enable confirmation.
+              </p>
+            )}
             <div className="modal-buttons">
               <button
                 type="button"
                 onClick={() => submit('DELIVERED')}
                 className="modal-button modal-success-button"
+                disabled={!hasSignature || submitting}
               >
-                Confirm Delivery (POD)
+                {submitting ? 'Submitting...' : 'Confirm Delivery (POD)'}
               </button>
-              <button type="button" onClick={onCancel} className="modal-button modal-cancel-button">
+              <button
+                type="button"
+                onClick={onCancel}
+                className="modal-button modal-cancel-button"
+                disabled={submitting}
+              >
                 Cancel
               </button>
             </div>
@@ -577,16 +637,22 @@ const ProofOfDeliveryModal = ({ delivery, initialMode = 'DELIVERED', onSubmit, o
               />
             </div>
 
+            {errorBanner}
             <div className="modal-buttons">
               <button
                 type="button"
                 onClick={() => submit('FAILED')}
                 className="modal-button modal-danger-button"
-                disabled={!failureReason}
+                disabled={!failureReason.trim() || submitting}
               >
-                Report Delivery Failed
+                {submitting ? 'Submitting...' : 'Report Delivery Failed'}
               </button>
-              <button type="button" onClick={onCancel} className="modal-button modal-cancel-button">
+              <button
+                type="button"
+                onClick={onCancel}
+                className="modal-button modal-cancel-button"
+                disabled={submitting}
+              >
                 Cancel
               </button>
             </div>

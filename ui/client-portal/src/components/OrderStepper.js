@@ -8,7 +8,6 @@ import {
   Navigation,
   Truck,
   CheckCircle2,
-  Clock,
   XCircle
 } from 'lucide-react';
 

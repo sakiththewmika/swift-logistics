@@ -3,13 +3,45 @@ import { Client } from '@stomp/stompjs';
 
 const websocketUrl = process.env.REACT_APP_WS_URL || 'ws://localhost:8080/ws';
 
-export const useDriverWebSocket = (driverId, orderId, onDispatch, onLocation) => {
+/**
+ * Keeps one STOMP connection per signed-in driver.
+ *
+ * The connection depends only on `driverId`. The active order id, the callbacks and the
+ * "pause GPS" flag are read through refs, so changing the active delivery never tears the
+ * socket down and reconnects it.
+ *
+ * `pauseGpsPublishing` suppresses the periodic raw browser-geolocation telemetry. Set it while the
+ * route simulator is publishing, otherwise the customer's map would jump between the real device
+ * position and the simulated one.
+ */
+export const useDriverWebSocket = (
+  driverId,
+  orderId,
+  onDispatch,
+  onLocation,
+  pauseGpsPublishing = false
+) => {
   const clientRef = useRef(null);
   const latestPositionRef = useRef(null);
+  const orderIdRef = useRef(orderId);
+  const onDispatchRef = useRef(onDispatch);
+  const onLocationRef = useRef(onLocation);
+  const pauseGpsRef = useRef(pauseGpsPublishing);
   const [connected, setConnected] = useState(false);
 
+  useEffect(() => {
+    orderIdRef.current = orderId;
+  }, [orderId]);
+  useEffect(() => {
+    onDispatchRef.current = onDispatch;
+    onLocationRef.current = onLocation;
+  }, [onDispatch, onLocation]);
+  useEffect(() => {
+    pauseGpsRef.current = pauseGpsPublishing;
+  }, [pauseGpsPublishing]);
+
   const publishLocation = useCallback((coords, activeOrderId) => {
-    const targetOrderId = activeOrderId || orderId;
+    const targetOrderId = activeOrderId || orderIdRef.current;
     if (clientRef.current && clientRef.current.connected && driverId && coords) {
       clientRef.current.publish({
         destination: '/app/telemetry',
@@ -24,7 +56,7 @@ export const useDriverWebSocket = (driverId, orderId, onDispatch, onLocation) =>
         }),
       });
     }
-  }, [driverId, orderId]);
+  }, [driverId]);
 
   useEffect(() => {
     if (!driverId) return undefined;
@@ -35,10 +67,10 @@ export const useDriverWebSocket = (driverId, orderId, onDispatch, onLocation) =>
       onConnect: () => {
         setConnected(true);
         client.subscribe(`/topic/drivers/${driverId}/dispatch`, message => {
-          onDispatch?.(JSON.parse(message.body));
+          onDispatchRef.current?.(JSON.parse(message.body));
         });
         client.subscribe(`/topic/drivers/${driverId}/location`, message => {
-          onLocation?.(JSON.parse(message.body));
+          onLocationRef.current?.(JSON.parse(message.body));
         });
       },
       onDisconnect: () => setConnected(false),
@@ -67,11 +99,14 @@ export const useDriverWebSocket = (driverId, orderId, onDispatch, onLocation) =>
 
     const telemetryTimer = window.setInterval(() => {
       const position = latestPositionRef.current;
-      if (position && client.connected) {
+      if (position && client.connected && !pauseGpsRef.current) {
         client.publish({
           destination: '/app/telemetry',
           body: JSON.stringify({
-            driverId, orderId, ...position, timestamp: new Date().toISOString()
+            driverId,
+            orderId: orderIdRef.current,
+            ...position,
+            timestamp: new Date().toISOString(),
           }),
         });
       }
@@ -84,7 +119,7 @@ export const useDriverWebSocket = (driverId, orderId, onDispatch, onLocation) =>
       clientRef.current = null;
       setConnected(false);
     };
-  }, [driverId, orderId, onDispatch, onLocation]);
+  }, [driverId]);
 
   return { connected, publishLocation };
 };

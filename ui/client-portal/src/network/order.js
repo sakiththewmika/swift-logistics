@@ -32,54 +32,83 @@ export const orderEndpoints = {
     return await NETWORK.get(`/drivers/driver/${driverId}`);
   },
 
+  /**
+   * Subscribes to live updates for one order and keeps the stream alive.
+   *
+   * EventSource reconnects by itself when the connection drops. If the browser gives up (readyState
+   * CLOSED, e.g. the server answered with an error) we retry with exponential backoff instead of
+   * leaving the order silently without live updates. After a reconnect a synthetic
+   * `{ type: 'sse-reconnected' }` message tells the caller to resync, since events may have been missed.
+   * Returns a handle with `close()`, or null when SSE is unsupported.
+   */
   trackOrder(orderId, onMessage, onLocation) {
     const baseUrl = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8080/api/v1';
     const sseHost = baseUrl.replace(/\/api\/v1\/?$/, '');
     const url = `${sseHost}/sse/order/${orderId}`;
 
-    if (typeof EventSource !== 'undefined') {
-      const source = new EventSource(url);
-
-      source.onmessage = function (event) {
-        try {
-          const update = JSON.parse(event.data);
-          onMessage?.(update);
-        } catch {
-          onMessage?.(event.data);
-        }
-      };
-
-      source.addEventListener('order-update', function (event) {
-        try {
-          const update = JSON.parse(event.data);
-          onMessage?.(update);
-        } catch {
-          onMessage?.(event.data);
-        }
-      });
-
-      source.addEventListener('location-update', function (event) {
-        try {
-          const loc = JSON.parse(event.data);
-          if (onLocation) {
-            onLocation(loc);
-          } else {
-            onMessage?.({ type: 'location-update', ...loc });
-          }
-        } catch {
-          // Ignore parse errors on malformed ping
-        }
-      });
-
-      source.onerror = function (err) {
-        console.warn('SSE connection closed/error for order:', orderId, err);
-        source.close();
-      };
-
-      return source;
-    } else {
+    if (typeof EventSource === 'undefined') {
       console.error('Your browser does not support Server-Sent Events.');
       return null;
     }
+
+    let source = null;
+    let closed = false;
+    let retryTimer = null;
+    let attempt = 0;
+    let hasOpened = false;
+
+    const parse = (event) => {
+      try {
+        return JSON.parse(event.data);
+      } catch {
+        return event.data;
+      }
+    };
+
+    const connect = () => {
+      if (closed) return;
+      source = new EventSource(url);
+
+      source.onopen = () => {
+        attempt = 0;
+        if (hasOpened) {
+          onMessage?.({ type: 'sse-reconnected' });
+        }
+        hasOpened = true;
+      };
+
+      source.onmessage = (event) => onMessage?.(parse(event));
+      source.addEventListener('order-update', (event) => onMessage?.(parse(event)));
+      source.addEventListener('location-update', (event) => {
+        const loc = parse(event);
+        if (!loc || typeof loc !== 'object') return; // ignore malformed pings
+        if (onLocation) {
+          onLocation(loc);
+        } else {
+          onMessage?.({ type: 'location-update', ...loc });
+        }
+      });
+
+      source.onerror = () => {
+        if (closed) return;
+        if (source.readyState === EventSource.CLOSED) {
+          const delay = Math.min(1000 * 2 ** attempt, 30000);
+          attempt += 1;
+          console.warn(`SSE for order ${orderId} closed; retrying in ${delay / 1000}s`);
+          retryTimer = setTimeout(connect, delay);
+        }
+        // Otherwise the browser is already reconnecting on its own.
+      };
+    };
+
+    connect();
+
+    return {
+      close() {
+        closed = true;
+        clearTimeout(retryTimer);
+        source?.close();
+      },
+    };
   },
 };

@@ -10,6 +10,7 @@ const initialState = () => ({
 
 const CreateOrderModal = ({ onClose, onCreate }) => {
   const [form, setForm] = useState(initialState());
+  const [submitting, setSubmitting] = useState(false);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -18,7 +19,20 @@ const CreateOrderModal = ({ onClose, onCreate }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    await onCreate({ ...form, totalAmount: Number(form.totalAmount) });
+    if (submitting) return; // a second click or Enter press must not create a second order
+    setSubmitting(true);
+    try {
+      await onCreate({
+        ...form,
+        deliveryAddress: form.deliveryAddress.trim(),
+        city: form.city.trim(),
+        postalCode: form.postalCode.trim(),
+        country: form.country.trim(),
+        totalAmount: Number(form.totalAmount),
+      });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const applyPreset = (preset) => setForm((previous) => ({ ...previous, ...preset }));
@@ -55,7 +69,7 @@ const CreateOrderModal = ({ onClose, onCreate }) => {
       <div className="modal">
         <h2 style={{ marginTop: 0, marginBottom: 18, fontWeight: 600, fontSize: 22, color: '#1e293b' }}>Create New
           Order</h2>
-        <div className="create-order-form">
+        <form className="create-order-form" onSubmit={handleSubmit}>
           <div>
             <span style={{ display: 'block', marginBottom: 8 }}>Quick-fill destination</span>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -84,7 +98,7 @@ const CreateOrderModal = ({ onClose, onCreate }) => {
             <input
               type="number"
               name="totalAmount"
-              min="0"
+              min="0.01"
               step="0.01"
               value={form.totalAmount}
               onChange={handleChange}
@@ -109,10 +123,12 @@ const CreateOrderModal = ({ onClose, onCreate }) => {
             <input name="country" value={form.country} onChange={handleChange} required/>
           </label>
           <div className="modal-actions">
-            <button type="button" onClick={onClose}>Cancel</button>
-            <button type="button" onClick={handleSubmit}>Create Order</button>
+            <button type="button" onClick={onClose} disabled={submitting}>Cancel</button>
+            <button type="submit" disabled={submitting}>
+              {submitting ? 'Creating...' : 'Create Order'}
+            </button>
           </div>
-        </div>
+        </form>
       </div>
     </div>
   );

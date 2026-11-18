@@ -249,15 +249,24 @@
   color: #fff;
   transition: background 0.2s;
 }
+/* Primary (submit) actions are always blue; secondary (type="button") actions are grey. */
+.modal-actions button[type="submit"] {
+  background: #2563eb;
+  color: #fff;
+}
+.modal-actions button[type="submit"]:hover:not(:disabled) {
+  background: #1d4ed8;
+}
 .modal-actions button[type="button"] {
   background: #e5e7eb;
   color: #374151;
 }
-.modal-actions button:hover {
-  background: #1d4ed8;
-}
-.modal-actions button[type="button"]:hover {
+.modal-actions button[type="button"]:hover:not(:disabled) {
   background: #d1d5db;
+}
+.modal-actions button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 .create-order-btn {
   background: #2563eb;
